@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/AsyncFuncAI/deepwiki-open",
+  "commit": "3e0f503b0cc815c1525a063911524d233bda2400",
+  "python": "3.12",
+  "entrypoint": "scripts/deepwiki_entry.py",
+  "note": "只运行生成后端，LumiWiki 提供管理界面；不需要启动上游 Next.js 前端。"
+}

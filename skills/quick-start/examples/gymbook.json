@@ -1,0 +1,157 @@
+{
+  "title": "场地预约任务示例",
+  "audience": "授权测试环境的普通用户",
+  "modules": [
+    {
+      "id": "booking",
+      "title": "完成一次场地预约",
+      "coverageReason": "覆盖核心状态变化及常见失败；权限分支需要另一测试角色，暂未覆盖。定位器是示例，运行前从真实页面确认。",
+      "scenarios": [
+        {
+          "id": "book-success",
+          "kind": "success",
+          "goal": "为唯一测试标记 lumi-run-001 预约场地并在我的预约核对场地、日期和状态",
+          "setup": "使用余额充足账号和可预约时段。示例定位器不代表真实 Gymbook 页面。",
+          "cleanup": "按测试环境规则恢复状态；实际清理结果单独记录，未执行时明确说明。",
+          "preconditions": [
+            {
+              "id": "ready",
+              "description": "可预约入口已显示",
+              "target": {
+                "role": "button",
+                "name": "预约"
+              },
+              "assertion": "visible"
+            },
+            {
+              "id": "funds",
+              "description": "测试余额充足",
+              "target": {
+                "testId": "balance"
+              },
+              "assertion": "text_equals",
+              "texts": [
+                "100"
+              ]
+            }
+          ],
+          "outcomes": [
+            {
+              "id": "created",
+              "description": "本次预约记录字段和状态正确",
+              "target": {
+                "testId": "lumi-run-001"
+              },
+              "assertion": "text_contains",
+              "scope": {
+                "testId": "records"
+              },
+              "texts": [
+                "场地A",
+                "2030-01-01",
+                "已预约"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "book-no-funds",
+          "kind": "error",
+          "goal": "余额不足时提示错误且没有创建本次预约",
+          "setup": "切换到余额为0且无本次记录的专用账号。",
+          "cleanup": "按测试环境规则恢复状态；实际清理结果单独记录，未执行时明确说明。",
+          "preconditions": [
+            {
+              "id": "zero",
+              "description": "账户余额为0",
+              "target": {
+                "testId": "balance"
+              },
+              "assertion": "text_equals",
+              "texts": [
+                "0"
+              ]
+            },
+            {
+              "id": "not-created",
+              "description": "操作前无本次记录",
+              "target": {
+                "testId": "lumi-run-001"
+              },
+              "assertion": "count",
+              "scope": {
+                "testId": "records"
+              },
+              "count": 0
+            }
+          ],
+          "outcomes": [
+            {
+              "id": "error",
+              "description": "显示余额不足",
+              "target": {
+                "role": "alert",
+                "name": "余额不足"
+              },
+              "assertion": "visible"
+            },
+            {
+              "id": "unchanged",
+              "description": "失败后仍没有本次记录",
+              "target": {
+                "testId": "lumi-run-001"
+              },
+              "assertion": "count",
+              "scope": {
+                "testId": "records"
+              },
+              "count": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reservations",
+      "title": "查看我的预约",
+      "coverageReason": "覆盖核心状态变化及常见失败；权限分支需要另一测试角色，暂未覆盖。定位器是示例，运行前从真实页面确认。",
+      "scenarios": [
+        {
+          "id": "no-reservations",
+          "kind": "empty",
+          "goal": "无预约的用户看到明确空态",
+          "setup": "准备无预约测试账号；无法准备时 blocked。",
+          "cleanup": "按测试环境规则恢复状态；实际清理结果单独记录，未执行时明确说明。",
+          "preconditions": [
+            {
+              "id": "empty-list",
+              "description": "预约列表加载且无记录",
+              "target": {
+                "css": "article"
+              },
+              "assertion": "count",
+              "scope": {
+                "testId": "records"
+              },
+              "count": 0
+            }
+          ],
+          "outcomes": [
+            {
+              "id": "empty-message",
+              "description": "显示暂无记录",
+              "target": {
+                "text": "暂无记录"
+              },
+              "assertion": "visible",
+              "scope": {
+                "testId": "records"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "profile": "general"
+}

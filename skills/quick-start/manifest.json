@@ -1,0 +1,22 @@
+{
+  "name": "quick-start",
+  "version": "0.3.0",
+  "runtime": "Pi SDK 1.4.0",
+  "entry": "SKILL.md",
+  "contract": "schemas/task-plan.schema.json",
+  "host": {
+    "module": "../../src/quick-start.ts",
+    "registration": "src/agent.ts explicitly registers quickStartHooks; this manifest is descriptive, not a Pi extension loader"
+  },
+  "references": [
+    "references/workflow.md",
+    "references/adapter-contract.md",
+    "references/admin.md"
+  ],
+  "examples": [
+    "examples/gymbook.json",
+    "examples/helpdesk.json",
+    "examples/admin-procurement.json"
+  ],
+  "evaluation": "evals/README.md"
+}

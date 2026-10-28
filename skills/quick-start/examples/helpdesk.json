@@ -1,0 +1,115 @@
+{
+  "title": "工单系统任务示例",
+  "audience": "授权测试环境的报障用户",
+  "modules": [
+    {
+      "id": "create-ticket",
+      "title": "提交工单并核对结果",
+      "coverageReason": "覆盖核心状态变化及常见失败；权限分支需要另一测试角色，暂未覆盖。定位器是示例，运行前从真实页面确认。",
+      "scenarios": [
+        {
+          "id": "ticket-success",
+          "kind": "success",
+          "goal": "提交带唯一标记 lumi-run-001 的工单，在列表核对标题和待处理状态",
+          "setup": "使用有创建权限的测试账号，工单标题填 网络故障 lumi-run-001。",
+          "cleanup": "按测试环境规则恢复状态；实际清理结果单独记录，未执行时明确说明。",
+          "preconditions": [
+            {
+              "id": "ready",
+              "description": "编辑表单可提交",
+              "target": {
+                "role": "button",
+                "name": "提交工单"
+              },
+              "assertion": "visible"
+            },
+            {
+              "id": "new",
+              "description": "列表中没有本次工单",
+              "target": {
+                "testId": "lumi-run-001"
+              },
+              "assertion": "count",
+              "scope": {
+                "testId": "records"
+              },
+              "count": 0
+            }
+          ],
+          "outcomes": [
+            {
+              "id": "created",
+              "description": "同一工单标题和状态正确",
+              "target": {
+                "testId": "lumi-run-001"
+              },
+              "assertion": "text_contains",
+              "scope": {
+                "testId": "records"
+              },
+              "texts": [
+                "网络故障",
+                "lumi-run-001",
+                "待处理"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ticket-invalid",
+          "kind": "error",
+          "goal": "必填标题为空时显示错误且不创建工单",
+          "setup": "重置测试数据并将标题留空。",
+          "cleanup": "按测试环境规则恢复状态；实际清理结果单独记录，未执行时明确说明。",
+          "preconditions": [
+            {
+              "id": "ready",
+              "description": "编辑表单可提交",
+              "target": {
+                "role": "button",
+                "name": "提交工单"
+              },
+              "assertion": "visible"
+            },
+            {
+              "id": "new",
+              "description": "本次工单未创建",
+              "target": {
+                "testId": "lumi-run-001"
+              },
+              "assertion": "count",
+              "scope": {
+                "testId": "records"
+              },
+              "count": 0
+            }
+          ],
+          "outcomes": [
+            {
+              "id": "error",
+              "description": "显示必填错误",
+              "target": {
+                "role": "alert",
+                "name": "请输入标题"
+              },
+              "assertion": "visible"
+            },
+            {
+              "id": "unchanged",
+              "description": "失败没有创建记录",
+              "target": {
+                "testId": "lumi-run-001"
+              },
+              "assertion": "count",
+              "scope": {
+                "testId": "records"
+              },
+              "count": 0
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "profile": "general"
+}

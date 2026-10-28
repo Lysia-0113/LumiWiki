@@ -1,0 +1,175 @@
+{
+  "title": "采购后台：定位并审批采购单",
+  "audience": "专用验收环境采购审核员",
+  "profile": "admin",
+  "modules": [
+    {
+      "id": "approval",
+      "title": "定位并审批采购单",
+      "coverageReason": "覆盖筛选定位、抽屉与表单、提交确认、刷新后的同一对象；错误和权限需独立准备状态。定位器是示例，运行前核实。",
+      "scenarios": [
+        {
+          "id": "approve-one",
+          "kind": "success",
+          "goal": "仅审批PO-012，刷新后核对该单已通过",
+          "setup": "使用独立种子数据、采购审核员身份并筛选PO-012",
+          "cleanup": "销毁独立验收服务及临时数据；未执行时明确说明",
+          "preconditions": [
+            {
+              "id": "pending",
+              "description": "按唯一单号核对同一行的业务字段",
+              "target": {
+                "role": "table",
+                "name": "采购单列表"
+              },
+              "assertion": "row_fields",
+              "rowKey": {
+                "column": "单号",
+                "value": "PO-012"
+              },
+              "fields": [
+                {
+                  "column": "申请人",
+                  "value": "李四"
+                },
+                {
+                  "column": "金额",
+                  "value": "¥320.00"
+                },
+                {
+                  "column": "状态",
+                  "value": "待审批"
+                }
+              ]
+            }
+          ],
+          "checkpoints": [
+            {
+              "id": "located",
+              "title": "定位正确的待审批记录",
+              "checks": [
+                {
+                  "id": "identity",
+                  "description": "按唯一单号核对同一行的业务字段",
+                  "target": {
+                    "role": "table",
+                    "name": "采购单列表"
+                  },
+                  "assertion": "row_fields",
+                  "rowKey": {
+                    "column": "单号",
+                    "value": "PO-012"
+                  },
+                  "fields": [
+                    {
+                      "column": "申请人",
+                      "value": "李四"
+                    },
+                    {
+                      "column": "金额",
+                      "value": "¥320.00"
+                    },
+                    {
+                      "column": "状态",
+                      "value": "待审批"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "form-ready",
+              "title": "核对审批对象与填写结果",
+              "checks": [
+                {
+                  "id": "drawer",
+                  "description": "抽屉属于本次采购单",
+                  "target": {
+                    "role": "heading",
+                    "name": "审批采购单 PO-012"
+                  },
+                  "assertion": "visible"
+                },
+                {
+                  "id": "decision",
+                  "description": "审批结果选择通过",
+                  "target": {
+                    "label": "审批结果"
+                  },
+                  "assertion": "selected_label_equals",
+                  "scope": {
+                    "role": "dialog",
+                    "name": "审批采购单 PO-012"
+                  },
+                  "texts": [
+                    "通过"
+                  ]
+                },
+                {
+                  "id": "comment",
+                  "description": "审批意见已填写",
+                  "target": {
+                    "label": "审批意见"
+                  },
+                  "assertion": "value_equals",
+                  "scope": {
+                    "role": "dialog",
+                    "name": "审批采购单 PO-012"
+                  },
+                  "texts": [
+                    "验收通过"
+                  ]
+                }
+              ]
+            }
+          ],
+          "outcomes": [
+            {
+              "id": "approved",
+              "description": "按唯一单号核对同一行的业务字段",
+              "target": {
+                "role": "table",
+                "name": "采购单列表"
+              },
+              "assertion": "row_fields",
+              "rowKey": {
+                "column": "单号",
+                "value": "PO-012"
+              },
+              "fields": [
+                {
+                  "column": "申请人",
+                  "value": "李四"
+                },
+                {
+                  "column": "金额",
+                  "value": "¥320.00"
+                },
+                {
+                  "column": "状态",
+                  "value": "已通过"
+                },
+                {
+                  "column": "更新人",
+                  "value": "采购审核员"
+                }
+              ]
+            },
+            {
+              "id": "query",
+              "description": "当前结果限定本次单号",
+              "target": {
+                "role": "textbox",
+                "name": "采购单号"
+              },
+              "assertion": "value_equals",
+              "texts": [
+                "PO-012"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

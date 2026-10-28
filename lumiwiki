@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")"
+task_node="$(command -v node || true)"
+if [ -z "$task_node" ]; then
+  task_node="$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+fi
+if [ ! -x "$task_node" ]; then
+  echo '需要 Node.js 22.19 或以上版本。' >&2
+  exit 1
+fi
+exec "$task_node" scripts/run.mjs "${1:-dev}"
