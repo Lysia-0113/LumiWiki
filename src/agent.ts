@@ -91,6 +91,7 @@ interface Conversation {
   browser?: BrowserSession;
   quickStart: QuickStartRun;
   qaResult?: QaAnswerResult;
+  streamedAnswer: string;
 }
 const conversations = new Map<string, Conversation>();
 export const escapeHtml = (text: string) =>
@@ -1040,6 +1041,7 @@ async function createConversation(
     browser,
     quickStart,
     qaResult: undefined,
+    streamedAnswer: "",
   };
   session.subscribe((event) => {
     if (
@@ -1053,14 +1055,17 @@ async function createConversation(
       });
     if (
       event.type === "message_update" &&
-      event.assistantMessageEvent.type === "text_delta"
-    )
+      event.assistantMessageEvent.type === "text_delta" &&
+      (!answerMode || !c.qaResult)
+    ) {
+      c.streamedAnswer += event.assistantMessageEvent.delta;
       c.emit({
         type: guide ? "agent_text" : "text",
         phase: guide?.phase,
         chapterId: guide?.chapterId,
         text: event.assistantMessageEvent.delta,
       });
+    }
     if (event.type === "tool_execution_start")
       c.emit({ type: "tool", name: event.toolName, status: "start" });
     if (event.type === "tool_execution_end")
@@ -1409,6 +1414,7 @@ export async function ask(
   c.emit = emit;
   c.toolCalls = 0;
   c.qaResult = undefined;
+  c.streamedAnswer = "";
   c.limit = publicMode
     ? Number(process.env.PUBLIC_MAX_TOOL_CALLS || 20)
     : config.maxTools;
@@ -1445,12 +1451,18 @@ export async function ask(
       throw new Error(last.errorMessage || "模型请求失败");
     if (timedOut) throw new Error("运行超时，已停止");
     if (signal.aborted) throw new Error("运行已取消");
-    if (answerMode)
+    if (answerMode) {
       ensure(
         last?.role === "assistant" && last.stopReason === "stop",
         "回答未完整结束，未保存问答",
         502,
       );
+      if (answer && c.streamedAnswer !== answer) {
+        if (c.streamedAnswer) emit({ type: "answer_start" });
+        emit({ type: "text", text: answer });
+        c.streamedAnswer = answer;
+      }
+    }
     emit({
       type: "done",
       result: {

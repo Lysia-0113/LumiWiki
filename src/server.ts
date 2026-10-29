@@ -154,7 +154,7 @@ export function createServer() {
         );
         res.setHeader(
           "Content-Security-Policy",
-          "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'",
+          "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'",
         );
         res.end(await readFile(path.join(publicDir, file)));
         return;

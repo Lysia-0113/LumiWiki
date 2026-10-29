@@ -743,20 +743,6 @@ async function stream(
         const event = JSON.parse(line.slice(6));
         if (event.type === "session" && !isPublic)
           state[sessionSlot] = event.sessionId;
-        if (
-          event.type === "guide_task" &&
-          !isPublic &&
-          sessionSlot === "session"
-        ) {
-          state.resumeTaskId = event.task.id;
-          $("#guide-task-status").textContent = taskProgress(event.task);
-          if (!state.guideTaskTimer && state.view === "guides")
-            state.guideTaskTimer = setTimeout(
-              () =>
-                loadGuideTasks().catch((error) => notice(error.message, true)),
-              2000,
-            );
-        }
         if (event.type === "agent_phase" && event.status === "running")
           target.insertBefore(
             node(
@@ -1138,17 +1124,6 @@ if (["/user", "/help"].includes(location.pathname)) {
     sessionStorage.removeItem("lumiwiki.token");
   });
 
-function taskProgress(task) {
-  const status =
-    {
-      running: "处理中",
-      paused: "已暂停，可继续",
-      blocked: "受阻，待处理",
-      completed: "完整指南已保存",
-      partial: "指南已保存，部分场景未完成",
-    }[task.status] || task.status;
-  return `${status} · 已保存 ${task.modulesSaved}/${task.modulesTotal} 个模块 · 已核验 ${task.scenariosVerified}/${task.scenariosTotal} 个场景`;
-}
 const chapterStatus = {
   planning: "规划目录中",
   running: "执行中",
@@ -1194,48 +1169,14 @@ async function loadGuideTasks() {
   if (!state.project || state.view !== "guides") return;
   const key = state.project.key,
     base = requireProject(),
-    [tasks, runs] = await Promise.all([
-      api(base + "/tasks"),
-      api(base + "/runs"),
-    ]);
+    runs = await api(base + "/runs");
   if (state.project?.key !== key || state.view !== "guides") return;
-  const items = tasks.items;
   const chapterTasks = runs.items.filter(
     (item) => item.kind === "chapter-guide",
   );
   const panel = $("#guide-tasks");
   panel.replaceChildren(node("h2", "指南任务"));
-  panel.hidden = !items.length && !chapterTasks.length;
-  for (const task of items) {
-    const item = node("div", undefined, "item");
-    item.append(node("strong", task.title), node("p", taskProgress(task)));
-    if (task.error) item.append(node("p", task.error, "muted"));
-    if (["paused", "blocked"].includes(task.status))
-      item.append(
-        button("继续任务", () => {
-          checkIdle();
-          if (
-            task.requiresReview &&
-            !confirm(
-              "上次操作可能已执行。请先在目标网页人工核对结果，确认无需重复提交后再继续。是否已完成核对？",
-            )
-          )
-            return;
-          state.resumeTaskId = task.id;
-          state.acknowledgePending = task.requiresReview;
-          $("#guide-composer").hidden = false;
-          $("#quick-start").checked = true;
-          $("#question").value =
-            "继续当前指南任务，保留原计划和已有成果，完成剩余模块并汇总。";
-          if (task.browserRequired && !state.browser) {
-            notice("请先连接目标网页并登录，再点击开始生成继续当前任务。");
-            return;
-          }
-          $("#ask-form").requestSubmit();
-        }),
-      );
-    panel.append(item);
-  }
+  panel.hidden = !chapterTasks.length;
   for (const task of chapterTasks) {
     const item = node("div", undefined, "item");
     item.append(
@@ -1255,10 +1196,7 @@ async function loadGuideTasks() {
       );
     panel.append(item);
   }
-  if (
-    items.some((task) => task.status === "running") ||
-    chapterTasks.some((task) => task.active)
-  )
+  if (chapterTasks.some((task) => task.active))
     state.guideTaskTimer = setTimeout(
       () => loadGuideTasks().catch((error) => notice(error.message, true)),
       2000,
