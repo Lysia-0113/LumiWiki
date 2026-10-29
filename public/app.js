@@ -110,6 +110,22 @@ async function refresh() {
   }
   if (!data.projects.length)
     $("#projects").append(node("p", "还没有项目，从右侧创建一个。", "empty"));
+  $("#project-settings").hidden = !state.project;
+  if (state.project) {
+    const settings = state.project.publicBrowser;
+    $("#project-target-url").value = state.project.url || "";
+    $("#public-browser-enabled").checked = settings.enabled;
+    $("#public-browser-url").value = settings.url || "";
+    $("#public-browser-url").placeholder =
+      state.project.url || "留空使用目标网页";
+    $("#public-browser-username").value = settings.username;
+    $("#public-browser-password").value = "";
+    $("#public-browser-password").placeholder = settings.passwordConfigured
+      ? "已保存，留空保留原密码"
+      : "未设置";
+    $("#clear-public-password").checked = false;
+    $("#clear-public-password-label").hidden = !settings.passwordConfigured;
+  }
   $("#auth").hidden = true;
   $("#admin").hidden = false;
   await loadView();
@@ -388,6 +404,44 @@ $("#project-form").onsubmit = async (e) => {
     notice("项目已创建。");
   } catch (err) {
     notice(err.message, true);
+  }
+};
+$("#project-settings-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const submit = e.target.querySelector("button");
+  submit.disabled = true;
+  try {
+    const password = $("#public-browser-password").value;
+    const url = $("#project-target-url").value;
+    const targetChanged = url !== (state.project?.url || "");
+    await api(requireProject(), {
+      method: "PATCH",
+      body: JSON.stringify({
+        url,
+        publicBrowser: {
+          enabled: $("#public-browser-enabled").checked,
+          url: $("#public-browser-url").value,
+          username: $("#public-browser-username").value,
+          ...($("#clear-public-password").checked
+            ? { password: "" }
+            : password
+              ? { password }
+              : {}),
+        },
+      }),
+    });
+    if (targetChanged) {
+      state.browser = null;
+      state.session = null;
+      $("#browser-status").textContent =
+        "浏览器未连接；仍可阅读已导入的知识库。";
+    }
+    await refresh();
+    notice("当前项目的设置已保存，后续问答将使用这些配置。");
+  } catch (err) {
+    notice(err.message, true);
+  } finally {
+    submit.disabled = false;
   }
 };
 $("#wiki-upload").onchange = async (e) => {

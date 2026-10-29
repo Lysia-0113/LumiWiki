@@ -84,6 +84,49 @@
               </form>
             </section>
           </div>
+          <section class="card" id="project-settings" hidden>
+            <h2>当前项目设置</h2>
+            <form id="project-settings-form" class="stack">
+              <label
+                >目标网页<input id="project-target-url" type="url"
+              /></label>
+              <label class="inline"
+                ><input
+                  id="public-browser-enabled"
+                  type="checkbox"
+                />允许用户问答通过浏览器探索此项目</label
+              >
+              <label
+                >问答探索地址（选填）<input
+                  id="public-browser-url"
+                  type="url"
+                  placeholder="留空使用上方目标网页"
+              /></label>
+              <p class="muted">
+                默认探索当前项目的目标网页；若有独立测试环境，可在这里填写它的网址。
+              </p>
+              <div class="columns">
+                <label
+                  >测试账号<input
+                    id="public-browser-username"
+                    autocomplete="off"
+                /></label>
+                <label
+                  >测试密码<input
+                    id="public-browser-password"
+                    type="password"
+                    autocomplete="new-password"
+                /></label>
+              </div>
+              <label class="inline" id="clear-public-password-label" hidden
+                ><input
+                  id="clear-public-password"
+                  type="checkbox"
+                />清除已保存的测试密码</label
+              >
+              <div><button class="primary">保存项目设置</button></div>
+            </form>
+          </section>
           <section class="card callout">
             <h2>先连接材料，再生成指南</h2>
             <p>
@@ -202,7 +245,9 @@
       <section id="user" hidden>
         <div class="card">
           <h2 id="user-title">系统使用助手</h2>
-          <p class="muted">先查找已审核的回答，再按需探索专用测试系统。</p>
+          <p class="muted">
+            先查找已审核的回答，再按需探索当前项目配置的网页。
+          </p>
           <div id="recommended" class="row"></div>
           <div id="user-messages" class="messages"></div>
           <form id="user-form" class="stack">
