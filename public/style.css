@@ -731,3 +731,45 @@ dialog .quiet {
   font-size: 13px;
   color: var(--muted);
 }
+.public-workspace {
+  max-width: 1200px;
+}
+.public-tabs {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin: 23px 0;
+}
+.public-tabs button.selected {
+  background: var(--green);
+  color: white;
+  border-color: var(--green);
+}
+#public-qa {
+  max-width: 850px;
+  margin: 0 auto;
+}
+.guide-contents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  background: var(--soft);
+  padding: 15px;
+  border-radius: 9px;
+}
+.guide-contents a {
+  font-size: 13px;
+}
+#publication-review {
+  width: min(620px, calc(100% - 32px));
+}
+#publication-review p {
+  font-size: 14px;
+}
+#publication-review .inline {
+  align-items: flex-start;
+}
+#publication-review input[type="checkbox"] {
+  margin-top: 6px;
+  flex: none;
+}

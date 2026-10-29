@@ -66,6 +66,7 @@ try {
   });
   const user = await browser.newPage();
   await user.goto(base + "/user");
+  await user.locator('[data-public-view="qa"]').click();
   await user.locator("#user-question").fill(q.question);
   await user.locator("#user-submit").click();
   await user.locator(".message.answer").filter({ hasText: q.answer }).waitFor();

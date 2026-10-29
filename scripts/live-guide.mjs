@@ -7,9 +7,11 @@ const { activeProject, getProject, projectDir } = await import(
   "../src/store.ts"
 );
 const { ask, disposeConversations } = await import("../src/agent.ts");
-const { connectBrowser, getBrowser, closeAllBrowsers } = await import(
-  "../src/browser.ts"
-);
+const {
+  connectProjectBrowser: connectBrowser,
+  getBrowser,
+  closeAllBrowsers,
+} = await import("../src/browser.ts");
 const project = await getProject(await activeProject());
 const report = {
   checkedAt: new Date().toISOString(),
@@ -87,14 +89,17 @@ try {
     }),
   );
   const guideBrowser = await connectBrowser(project, true);
+  assert.equal(guideBrowser.id, publicBrowser.id, "指南与问答必须复用登录会话");
   const page = getBrowser(guideBrowser.id, project.key).page;
-  await page
-    .locator('input[name="username"]')
-    .fill(process.env.PUBLIC_TEST_USERNAME);
-  await page
-    .locator('input[name="password"]')
-    .fill(process.env.PUBLIC_TEST_PASSWORD);
-  await page.locator('form[data-form="login"] button[type="submit"]').click();
+  if (await page.locator('input[name="password"]').isVisible()) {
+    await page
+      .locator('input[name="username"]')
+      .fill(process.env.PUBLIC_TEST_USERNAME);
+    await page
+      .locator('input[name="password"]')
+      .fill(process.env.PUBLIC_TEST_PASSWORD);
+    await page.locator('form[data-form="login"] button[type="submit"]').click();
+  }
   await page.waitForFunction(() =>
     Boolean(document.querySelector("#gp-account-name")?.textContent),
   );

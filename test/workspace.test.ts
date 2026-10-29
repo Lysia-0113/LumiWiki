@@ -216,6 +216,7 @@ test("三栏目工作台接入真实产物、文字 QA 生成/编辑/审核、�
       .waitFor();
     const publicPage = await browser.newPage();
     await publicPage.goto(`http://127.0.0.1:${config.port}/user`);
+    await publicPage.locator('[data-public-view="qa"]').click();
     await publicPage.locator("#user-question").fill(qa.question);
     await publicPage.locator("#user-submit").click();
     await publicPage

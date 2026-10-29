@@ -20,7 +20,8 @@ import {
 } from "./store.js";
 import { deleteWiki, importWiki, listWiki, parseWiki } from "./knowledge.js";
 import {
-  connectBrowser,
+  connectProjectBrowser,
+  projectBrowserBusy,
   closeBrowser,
   closeAllBrowsers,
   closeProjectBrowsers,
@@ -41,6 +42,15 @@ import {
 } from "./deepwiki.js";
 import { listQa, matchQa, publicQa, saveQa } from "./qa.js";
 import { generateGuideQa } from "./quick-start-qa.js";
+import {
+  listPublications,
+  publicationInfo,
+  publishGuide,
+  withdrawGuide,
+  publicGuides,
+  publicGuide,
+  publicGuideImage,
+} from "./publications.js";
 
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
 function adminProject(project: Project) {
@@ -198,8 +208,12 @@ export function createServer() {
         if (sub === "activate" && method === "POST") {
           const old = await activeProject();
           if (old && old !== id) {
+            ensure(
+              !projectBrowserBusy(old),
+              "项目浏览器正在使用，请稍后切换",
+              409,
+            );
             await disposeConversations(old);
-            await closeProjectBrowsers(old);
           }
           await atomic(path.join(config.data, "deployment.json"), {
             activeProjectId: id,
@@ -271,6 +285,26 @@ export function createServer() {
             ...guideTaskSummary(task),
             workflow: task.workflow,
           });
+          return;
+        }
+        if (sub === "publications" && method === "GET") {
+          send(res, 200, {
+            items: (await listPublications(id)).map(publicationInfo),
+          });
+          return;
+        }
+        if (sub === "publications" && method === "POST") {
+          const data = await body(req);
+          send(
+            res,
+            200,
+            await publishGuide(id, data.kind, data.id, data.reviewed),
+          );
+          return;
+        }
+        const publicationId = sub.match(/^publications\/([a-f0-9-]{36})$/);
+        if (publicationId && method === "DELETE") {
+          send(res, 200, await withdrawGuide(id, publicationId[1]));
           return;
         }
         if (sub === "qa" && method === "GET") {
@@ -346,8 +380,25 @@ export function createServer() {
         }
         if (!sub && method === "PATCH") {
           const data = await body(req);
+          const before = publicBrowserSettings(project);
+          const connectionChange =
+            (data.url !== undefined && data.url !== project.url) ||
+            (data.publicBrowser?.username !== undefined &&
+              data.publicBrowser.username !== before.username) ||
+            (data.publicBrowser?.password !== undefined &&
+              data.publicBrowser.password !== before.password);
+          ensure(
+            !connectionChange || !projectBrowserBusy(id),
+            "浏览器正在使用，请结束当前任务后修改网址或登录信息",
+            409,
+          );
           const updated = await updateProject(id, data);
-          if (updated.url !== project.url) {
+          const after = publicBrowserSettings(updated);
+          if (
+            updated.url !== project.url ||
+            before.username !== after.username ||
+            before.password !== after.password
+          ) {
             await disposeConversations(id);
             await closeProjectBrowsers(id);
           }
@@ -366,7 +417,11 @@ export function createServer() {
       }
       if (route === "/api/browser" && method === "POST") {
         const data = await body(req);
-        send(res, 201, await connectBrowser(await getProject(data.projectKey)));
+        send(
+          res,
+          201,
+          await connectProjectBrowser(await getProject(data.projectKey)),
+        );
         return;
       }
       const br = route.match(/^\/api\/browser\/([a-f0-9-]{36})$/);
@@ -423,17 +478,50 @@ export function createServer() {
         return;
       }
       if (isPublic) {
-        const active = await activeProject();
+        const input = method === "POST" ? await body(req) : null;
+        const active =
+          u.searchParams.get("project") ||
+          input?.projectKey ||
+          (await activeProject());
         ensure(active, "尚未选择项目", 503);
+        ensure(
+          typeof active === "string" && validId(active),
+          "项目不存在",
+          404,
+        );
         const project = await getProject(active);
-        if (route === "/api/v1/public/config") {
+        if (route === "/api/v1/public/config" && method === "GET") {
           send(res, 200, {
+            projectKey: project.key,
             name: project.name,
             recommendedQuestions: (await listQa(active))
               .filter((q) => q.status === "verified")
               .slice(0, 6)
               .map((q) => q.question),
           });
+          return;
+        }
+        if (route === "/api/v1/public/guides" && method === "GET") {
+          send(res, 200, { items: await publicGuides(active) });
+          return;
+        }
+        const published = route.match(
+          /^\/api\/v1\/public\/guides\/([a-f0-9-]{36})(?:\/images\/([a-f0-9-]{36}))?$/,
+        );
+        if (published && method === "GET") {
+          if (published[2]) {
+            const version = u.searchParams.has("version")
+              ? Number(u.searchParams.get("version"))
+              : undefined;
+            const image = await publicGuideImage(
+              active,
+              published[1],
+              published[2],
+              version,
+            );
+            res.setHeader("Content-Type", "image/png");
+            res.end(image);
+          } else send(res, 200, await publicGuide(active, published[1]));
           return;
         }
         if (route === "/api/v1/public/qa" && method === "GET") {
@@ -445,7 +533,7 @@ export function createServer() {
           return;
         }
         if (route === "/api/v1/public/ask" && method === "POST") {
-          const data = await body(req);
+          const data = input!;
           ensure(
             typeof data.question === "string" &&
               data.question.trim() &&
@@ -484,12 +572,7 @@ export function createServer() {
             } else {
               const settings = publicBrowserSettings(project);
               if (settings.enabled) {
-                browserId = (
-                  await connectBrowser(
-                    { ...project, url: settings.url || project.url },
-                    true,
-                  )
-                ).id;
+                browserId = (await connectProjectBrowser(project)).id;
               }
               await ask(
                 project,
@@ -509,12 +592,13 @@ export function createServer() {
           } catch (e) {
             emit({
               type: "error",
-              error: "当前无法完成回答，请联系管理员检查模型和测试环境配置。",
+              error:
+                e instanceof HttpError && e.status === 409
+                  ? "共享浏览器正在处理其他任务，请稍后重试。"
+                  : "当前无法完成回答，请联系管理员检查模型和项目浏览器配置。",
             });
           } finally {
             clearInterval(keep);
-            if (browserId)
-              await closeBrowser(browserId, active).catch(() => {});
             res.end();
           }
           return;

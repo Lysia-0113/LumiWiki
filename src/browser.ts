@@ -23,6 +23,7 @@ export interface BrowserSession {
   context: BrowserContext;
   page: Page;
   origin: string;
+  targetUrl: string;
   observed: Set<string>;
   refs: Set<string>;
   seenControls: Set<string>;
@@ -30,6 +31,39 @@ export interface BrowserSession {
   busy: boolean;
 }
 const sessions = new Map<string, BrowserSession>();
+const opening = new Map<string, Promise<{ id: string; url: string }>>();
+export function projectBrowserBusy(projectId: string) {
+  return [...sessions.values()].some(
+    (session) => session.projectId === projectId && session.busy,
+  );
+}
+export async function connectProjectBrowser(
+  project: Project,
+  headless = process.env.BROWSER_HEADLESS === "true",
+) {
+  ensure(project.url, "请先为项目配置目标网页");
+  const pending = opening.get(project.key);
+  if (pending) return pending;
+  const current = [...sessions.values()].find(
+    (session) =>
+      session.projectId === project.key &&
+      session.targetUrl === project.url &&
+      !session.page.isClosed(),
+  );
+  if (current) return { id: current.id, url: current.page.url() };
+  ensure(
+    sessions.size + opening.size < 10,
+    "浏览器会话已满，请关闭已有会话",
+    429,
+  );
+  const created = connectBrowser(project, headless);
+  opening.set(project.key, created);
+  try {
+    return await created;
+  } finally {
+    if (opening.get(project.key) === created) opening.delete(project.key);
+  }
+}
 export async function connectBrowser(
   project: Project,
   headless = process.env.BROWSER_HEADLESS === "true",
@@ -62,6 +96,7 @@ export async function connectBrowser(
     context,
     page,
     origin,
+    targetUrl: project.url,
     observed: new Set(),
     refs: new Set(),
     seenControls: new Set(),
@@ -638,11 +673,13 @@ export async function screenshot(
   return result;
 }
 export async function closeAllBrowsers() {
+  await Promise.allSettled([...opening.values()]);
   await Promise.allSettled(
     [...sessions.values()].map((s) => s.context.close()),
   );
 }
 export async function closeProjectBrowsers(projectId: string) {
+  await opening.get(projectId)?.catch(() => {});
   await Promise.allSettled(
     [...sessions.values()]
       .filter((s) => s.projectId === projectId)

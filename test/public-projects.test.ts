@@ -17,7 +17,7 @@ import {
   updateProject,
 } from "../src/store.js";
 import { createServer } from "../src/server.js";
-import { closeAllBrowsers } from "../src/browser.js";
+import { closeAllBrowsers, getBrowser } from "../src/browser.js";
 import { disposeConversations } from "../src/agent.js";
 import { saveQa } from "../src/qa.js";
 
@@ -26,6 +26,7 @@ config.data = tmp;
 config.token = "project-settings-fixture";
 config.deepwiki = "http://127.0.0.1:1";
 Object.assign(process.env, {
+  BROWSER_HEADLESS: "true",
   PUBLIC_BROWSER_ENABLED: "true",
   PUBLIC_TEST_URL: "http://127.0.0.1:9098",
   PUBLIC_TEST_USERNAME: "default-user",
@@ -92,6 +93,10 @@ const modelUrl = await listen(
       stream(res, "browser_observe");
     else if (tools.includes("browser_login") && results.length === 1) {
       const observed = JSON.parse(results[0].content);
+      if (!observed.elements.some((element: any) => element.label === "密码")) {
+        stream(res);
+        return;
+      }
       const ref = (label: string) =>
         observed.elements.find((e: any) => e.label === label).ref;
       stream(res, "browser_login", {
@@ -156,7 +161,7 @@ async function publicAsk(question = "怎么记录一个新的备忘录啊？") {
 
 test("项目保存独立默认值；旧项目只迁移一次，网址始终跟随目标网页", async () => {
   const p = await createProject({ name: "新项目", url: webUrl + "/new" });
-  assert.equal(p.publicBrowser?.url, null);
+  assert.ok(!("url" in p.publicBrowser!));
   assert.equal(p.publicBrowser?.username, "default-user");
   const id = randomUUID();
   await atomic(path.join(projectDir(id), "project.json"), {
@@ -182,7 +187,7 @@ test("项目保存独立默认值；旧项目只迁移一次，网址始终跟�
       p.publicBrowser,
     );
     const updated = await updateProject(id, { url: webUrl + "/changed/" });
-    assert.equal(updated.publicBrowser?.url, null);
+    assert.ok(!("url" in updated.publicBrowser!));
     assert.equal(updated.url, webUrl + "/changed/");
     assert.equal(updated.publicBrowser?.password, "default-password");
   } finally {
@@ -213,7 +218,7 @@ test("管理接口支持项目探索设置，隐藏密码，部分更新保留�
   assert.equal(p.publicBrowser.passwordConfigured, true);
   const updated = await api(
     route,
-    { publicBrowser: { enabled: false, url: webUrl + "/test/" } },
+    { publicBrowser: { enabled: false } },
     "PATCH",
   );
   assert.equal(updated.publicBrowser.passwordConfigured, true);
@@ -227,7 +232,7 @@ test("管理接口支持项目探索设置，隐藏密码，部分更新保留�
   );
   await api(route, { publicBrowser: { password: "", url: "" } }, "PATCH");
   assert.equal((await getProject(p.key)).publicBrowser?.password, "");
-  assert.equal((await getProject(p.key)).publicBrowser?.url, null);
+  assert.ok(!("url" in (await getProject(p.key)).publicBrowser!));
   for (const invalid of [
     { enabled: "true" },
     { url: "javascript:alert(1)" },
@@ -284,20 +289,25 @@ test("公共问答忽略全局旧地址，切换项目后访问各自网址并�
   }
 });
 
-test("独立探索地址覆盖目标网页；关闭浏览器和已审核问答不启动浏览器", async () => {
+test("只接受一个目标网页；改网址会换会话，关闭探索和已审核回答不操作浏览器", async () => {
   const p = await api("/api/projects", {
-    name: "独立测试环境",
-    url: "http://127.0.0.1:1/unused",
+    name: "同一目标网页",
+    url: webUrl + "/shared-target/",
     publicBrowser: {
       enabled: true,
-      url: webUrl + "/isolated/",
       username: "test-user",
       password: "test-secret",
     },
   });
+  await assert.rejects(
+    updateProject(p.key, {
+      publicBrowser: { url: webUrl + "/ignored/" } as any,
+    }),
+    /共用目标网页/,
+  );
   await publicAsk();
   assert.deepEqual(logins.at(-1), {
-    site: "/isolated/",
+    site: "/shared-target/",
     username: "test-user",
     password: "test-secret",
   });
@@ -363,7 +373,8 @@ test("管理台可编辑当前项目配置，密码留空保留，切换项目�
       await page.locator("#project-target-url").inputValue(),
       webUrl + "/ui-a/",
     );
-    await page.locator("#public-browser-url").fill(webUrl + "/ui-a-test/");
+    assert.equal(await page.locator("#public-browser-url").count(), 0);
+    await page.locator("#project-target-url").fill(webUrl + "/ui-a-test/");
     await page.locator("#public-browser-username").fill("ui-a-user");
     await page.locator("#public-browser-password").fill("ui-a-secret");
     await page.locator("#project-settings-form button").click();
@@ -371,7 +382,8 @@ test("管理台可编辑当前项目配置，密码留空保留，切换项目�
       document.querySelector("#notice")?.textContent?.includes("设置已保存"),
     );
     const saved = await getProject(a.key);
-    assert.equal(saved.publicBrowser?.url, webUrl + "/ui-a-test/");
+    assert.equal(saved.url, webUrl + "/ui-a-test/");
+    assert.ok(!("url" in saved.publicBrowser!));
     assert.equal(saved.publicBrowser?.password, "ui-a-secret");
     assert.equal(
       await page.locator("#public-browser-password").inputValue(),
@@ -404,7 +416,7 @@ test("管理台可编辑当前项目配置，密码留空保留，切换项目�
       await page.locator("#public-browser-enabled").isChecked(),
       false,
     );
-    assert.equal(await page.locator("#public-browser-url").inputValue(), "");
+    assert.equal(await page.locator("#public-browser-url").count(), 0);
     assert.equal(
       await page
         .locator("#public-browser-password")
@@ -436,4 +448,120 @@ test("管理台可编辑当前项目配置，密码留空保留，切换项目�
   } finally {
     await browser.close();
   }
+});
+
+test("旧的探索地址迁移后只保留目标网页，登录账号不丢失", async () => {
+  const project = await createProject({
+    name: "legacy override",
+    url: webUrl + "/legacy-target/",
+  });
+  await atomic(path.join(projectDir(project.key), "project.json"), {
+    ...project,
+    publicBrowser: {
+      enabled: true,
+      url: webUrl + "/obsolete/",
+      username: "kept-user",
+      password: "kept-secret",
+    },
+  });
+  await migrateProjectSettings();
+  const saved = await getProject(project.key);
+  assert.equal(saved.url, webUrl + "/legacy-target/");
+  assert.deepEqual(saved.publicBrowser, {
+    enabled: true,
+    username: "kept-user",
+    password: "kept-secret",
+  });
+});
+
+test("快速上手与用户探索复用同一登录会话；并发连接只创建一个浏览器，繁忙不抢占页面", async () => {
+  const p = await api("/api/projects", {
+    name: "共享登录项目",
+    url: webUrl + "/same-session/",
+    publicBrowser: { enabled: true, username: "", password: "" },
+  });
+  const [first, second] = await Promise.all([
+    api("/api/browser", { projectKey: p.key }),
+    api("/api/browser", { projectKey: p.key }),
+  ]);
+  assert.equal(first.id, second.id);
+  const session = getBrowser(first.id, p.key);
+  await session.context.addCookies([
+    { name: "shared-login", value: "yes", url: webUrl },
+  ]);
+  await session.page.setContent("<h1>共享登录页面</h1>");
+  const before = visits.length;
+  await publicAsk();
+  assert.equal(visits.length, before);
+  assert.ok(modelInputs.at(-1)?.includes("共享登录页面"));
+  const connected = await api("/api/browser", { projectKey: p.key });
+  assert.equal(connected.id, first.id);
+  assert.ok(
+    (await session.context.cookies()).some(
+      (cookie) => cookie.name === "shared-login" && cookie.value === "yes",
+    ),
+  );
+  const other = await api("/api/projects", {
+    name: "其他共享项目",
+    url: webUrl + "/other-shared/",
+  });
+  await api(`/api/projects/${p.key}/activate`, {});
+  assert.equal((await api("/api/browser", { projectKey: p.key })).id, first.id);
+  session.busy = true;
+  const requestsBefore = modelRequests;
+  try {
+    const response = await fetch(
+      appUrl + "/api/v1/public/ask?project=" + p.key,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: "请查看当前页面" }),
+      },
+    );
+    const events = await response.text();
+    assert.ok(events.includes("共享浏览器正在处理其他任务"));
+    assert.equal(modelRequests, requestsBefore);
+    assert.equal(session.page.url(), webUrl + "/same-session/");
+  } finally {
+    session.busy = false;
+  }
+  await api(
+    `/api/projects/${p.key}`,
+    { url: webUrl + "/new-target/" },
+    "PATCH",
+  );
+  assert.equal(session.page.isClosed(), true);
+  const changed = await api("/api/browser", { projectKey: p.key });
+  assert.notEqual(changed.id, first.id);
+  assert.equal(
+    getBrowser(changed.id, p.key).page.url(),
+    webUrl + "/new-target/",
+  );
+  const current = getBrowser(changed.id, p.key);
+  current.busy = true;
+  try {
+    const blocked = await fetch(appUrl + `/api/projects/${p.key}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-QA-Admin-Token": config.token,
+      },
+      body: JSON.stringify({
+        publicBrowser: { username: "changed-user", password: "changed-secret" },
+      }),
+    });
+    assert.equal(blocked.status, 409);
+    assert.equal((await getProject(p.key)).publicBrowser?.username, "");
+  } finally {
+    current.busy = false;
+  }
+  await api(
+    `/api/projects/${p.key}`,
+    { publicBrowser: { username: "changed-user", password: "changed-secret" } },
+    "PATCH",
+  );
+  assert.equal(current.page.isClosed(), true);
+  await publicAsk();
+  assert.equal(logins.at(-1)?.username, "changed-user");
+  assert.equal(logins.at(-1)?.password, "changed-secret");
 });

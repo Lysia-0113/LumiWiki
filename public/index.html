@@ -46,7 +46,8 @@
             ><button data-view="config">⚙ <span>项目配置</span></button>
           </nav>
           <div class="sidebar-bottom">
-            <a href="/user" target="_blank" rel="noopener">打开用户问答 ↗</a
+            <a id="public-link" href="/user" target="_blank" rel="noopener"
+              >打开用户帮助 ↗</a
             ><span>产物按项目保存</span>
           </div>
         </aside>
@@ -168,7 +169,9 @@
                 <h2>当前项目设置</h2>
                 <form id="project-settings-form" class="stack">
                   <label
-                    >目标网页<input id="project-target-url" type="url"
+                    >目标网页（快速上手与问答共用）<input
+                      id="project-target-url"
+                      type="url"
                   /></label>
                   <label class="inline"
                     ><input
@@ -176,14 +179,8 @@
                       type="checkbox"
                     />允许用户问答通过浏览器探索此项目</label
                   >
-                  <label
-                    >问答探索地址（选填）<input
-                      id="public-browser-url"
-                      type="url"
-                      placeholder="留空使用上方目标网页"
-                  /></label>
                   <p class="muted">
-                    默认探索当前项目的目标网页；若有独立测试环境，可在这里填写它的网址。
+                    快速上手和用户问答共用此网址及已登录的浏览器会话。先连接目标网页并登录，后续探索继续使用同一会话；繁忙时请等待当前任务完成。
                   </p>
                   <div class="columns">
                     <label
@@ -266,25 +263,81 @@
         <div class="surface">
           <small>LUMIWIKI HELP</small>
           <h1 id="user-title">系统使用助手</h1>
-          <p>查找已审核的回答，或提出你的具体问题。</p>
-          <div id="recommended" class="row"></div>
-          <div id="user-messages" class="messages" aria-live="polite"></div>
-          <form id="user-form" class="stack">
-            <label for="user-question">你的问题</label
-            ><textarea
-              id="user-question"
-              rows="3"
-              placeholder="你想了解系统的什么功能？"
-              required
-            ></textarea>
-            <div class="row">
-              <button class="primary" id="user-submit">提问</button
-              ><button type="button" id="user-stop" hidden>停止</button>
+          <p>阅读已发布的上手指南，或通过 QA 查询具体操作。</p>
+          <nav class="public-tabs" aria-label="帮助中心栏目">
+            <button
+              type="button"
+              data-public-view="guides"
+              class="selected"
+              aria-pressed="true"
+            >
+              快速上手</button
+            ><button type="button" data-public-view="qa" aria-pressed="false">
+              QA 问答
+            </button>
+          </nav>
+          <section id="public-guides" data-public-panel="guides">
+            <div class="library">
+              <aside class="library-list">
+                <div class="list-heading">
+                  <span>快速上手指南</span
+                  ><span id="public-guide-count">0 份</span>
+                </div>
+                <div id="public-guide-list"></div>
+              </aside>
+              <article id="public-guide-detail" class="library-detail">
+                <p class="empty">选择一份指南，查看操作步骤和配图。</p>
+              </article>
             </div>
-          </form>
+          </section>
+          <section id="public-qa" data-public-panel="qa" hidden>
+            <div id="recommended" class="row"></div>
+            <div id="user-messages" class="messages" aria-live="polite"></div>
+            <form id="user-form" class="stack">
+              <label for="user-question">你的问题</label
+              ><textarea
+                id="user-question"
+                rows="3"
+                placeholder="你想了解系统的什么功能？"
+                required
+              ></textarea>
+              <div class="row">
+                <button class="primary" id="user-submit" disabled>提问</button
+                ><button type="button" id="user-stop" hidden>停止</button>
+              </div>
+            </form>
+          </section>
         </div>
       </section>
     </main>
+    <dialog id="publication-review">
+      <form id="publication-form" class="stack">
+        <div class="row spread">
+          <h2>审核并发布指南</h2>
+          <button
+            type="button"
+            id="close-publication-review"
+            class="quiet"
+            aria-label="取消发布"
+          >
+            ×
+          </button>
+        </div>
+        <h3 id="publication-title"></h3>
+        <p>
+          确认预览中的操作步骤、截图和适用范围后发布。用户将阅读这一版内容；之后修改草稿不会自动更新公开版本。
+        </p>
+        <label class="inline"
+          ><input
+            id="publication-reviewed"
+            type="checkbox"
+            required
+          />我已审核内容、截图和限制说明，确认可以向用户发布</label
+        >
+        <p id="publication-error" role="alert" class="error"></p>
+        <button class="primary">确认审核并发布</button>
+      </form>
+    </dialog>
     <dialog id="qa-editor">
       <form id="qa-form" class="stack">
         <div class="row spread">

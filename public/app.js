@@ -19,6 +19,13 @@ const state = {
   selectedGuide: null,
   selectedQa: null,
   guideNames: {},
+  publications: {},
+  reviewDocument: null,
+  publicProject: null,
+  publicGuides: [],
+  publicGuide: null,
+  publicView: "guides",
+  publicEpoch: 0,
   previewEpoch: 0,
   imageUrls: [],
 };
@@ -149,6 +156,9 @@ async function refresh() {
     if (task) watchWiki(requireProject(), task);
   }
   $("#project-name").textContent = state.project?.name || "尚未选择项目";
+  $("#public-link").href = state.project
+    ? `/user?project=${state.project.key}`
+    : "/user";
   $("#project-select").replaceChildren();
   if (!data.projects.length)
     $("#project-select").append(new Option("尚未创建项目", ""));
@@ -197,11 +207,15 @@ async function loadView() {
   const base = requireProject(),
     key = state.project.key;
   if (state.view === "guides") {
-    const [guides, docs] = await Promise.all([
+    const [guides, docs, publications] = await Promise.all([
       api(base + "/guides"),
       api(base + "/documents"),
+      api(base + "/publications"),
     ]);
     if (state.project?.key !== key) return;
+    state.publications = Object.fromEntries(
+      publications.items.map((item) => [item.id, item]),
+    );
     state.guides = [
       ...guides.items.map((doc) => ({ ...doc, kind: "guides" })),
       ...docs.items.map((doc) => ({ ...doc, kind: "documents" })),
@@ -234,7 +248,9 @@ function record(title, meta, status, selected, fn) {
     node(
       "span",
       status,
-      status === "待审核" || status === "待复核" ? "badge draft" : "badge",
+      ["待审核", "待复核", "未发布", "已撤回"].includes(status)
+        ? "badge draft"
+        : "badge",
     ),
   );
   el.append(node("strong", title), info);
@@ -255,7 +271,7 @@ function renderGuides() {
       record(
         doc.title,
         doc.kind === "guides" ? `${doc.modules.length} 个模块` : "单篇文档",
-        "待复核",
+        publicationLabel(state.publications[doc.id]),
         state.selectedGuide === id,
         () => {
           state.selectedGuide = id;
@@ -286,7 +302,13 @@ async function renderGuide() {
     return;
   }
   target.append(
-    node("span", "待人工复核", "badge draft"),
+    node(
+      "span",
+      publicationLabel(state.publications[doc.id]),
+      state.publications[doc.id]?.status === "published"
+        ? "badge"
+        : "badge draft",
+    ),
     node("h2", doc.title),
   );
   const actions = node("div", undefined, "actions");
@@ -296,7 +318,43 @@ async function renderGuide() {
         protectedOpen(`${base}/${doc.kind}/${doc.id}.${ext}`),
       ),
     );
+  const publication = state.publications[doc.id];
+  actions.append(
+    button(
+      publication?.status === "published" ? "审核并更新发布" : "审核并发布",
+      () => reviewPublication(doc),
+      "primary",
+    ),
+  );
+  if (publication?.status === "published") {
+    actions.append(
+      button("查看用户版本", () =>
+        window.open(
+          `/user?project=${state.project.key}&guide=${doc.id}`,
+          "_blank",
+          "noopener",
+        ),
+      ),
+    );
+    actions.append(
+      button("撤回发布", async () => {
+        if (!confirm("撤回后，用户将无法继续打开这份指南。确认撤回？")) return;
+        await api(`${base}/publications/${doc.id}`, { method: "DELETE" });
+        await loadView();
+        notice("指南已撤回，用户端不再展示。");
+      }),
+    );
+  }
   target.append(actions);
+  target.append(
+    node(
+      "p",
+      publication?.status === "published"
+        ? `用户正在阅读已审核的第 ${publication.version} 版。当前预览的产物修改后，需要重新审核发布才会更新用户版本。`
+        : "本文尚未向用户公开，审核并发布后会显示在用户端快速上手中。",
+      "muted",
+    ),
+  );
   if (doc.kind === "guides") {
     const job = doc.qaGeneration;
     target.append(
@@ -570,8 +628,8 @@ async function connectBrowser() {
   state.session = null;
   state.qaSession = null;
   $("#browser-status").textContent =
-    `已连接 ${result.url}；可在独立浏览器中登录。`;
-  notice("目标网页已连接。");
+    `已连接 ${result.url}；快速上手与问答共用此登录会话。`;
+  notice("项目共享浏览器已连接。");
 }
 async function stream(
   route,
@@ -948,7 +1006,12 @@ $("#user-form").onsubmit = async (event) => {
   $("#user-submit").disabled = true;
   $("#user-stop").hidden = false;
   try {
-    await stream("/api/v1/public/ask", { question }, $("#user-messages"), true);
+    await stream(
+      publicRoute("/api/v1/public/ask"),
+      { question },
+      $("#user-messages"),
+      true,
+    );
     $("#user-question").value = "";
   } catch (error) {
     $("#user-messages").append(
@@ -968,19 +1031,12 @@ if (["/user", "/help"].includes(location.pathname)) {
   document.body.classList.add("user-mode");
   $("#auth").hidden = true;
   $("#user").hidden = false;
-  api("/api/v1/public/config")
-    .then((data) => {
-      $("#user-title").textContent = data.name;
-      for (const question of data.recommendedQuestions)
-        $("#recommended").append(
-          button(question, () => {
-            $("#user-question").value = question;
-          }),
-        );
-    })
-    .catch((error) =>
-      $("#user-messages").append(node("p", error.message, "error")),
+  initializePublic().catch((error) => {
+    $("#public-guide-detail").replaceChildren(
+      node("p", error.message, "error"),
     );
+    $("#user-messages").append(node("p", error.message, "error"));
+  });
 } else if (state.token)
   refresh().catch((error) => {
     notice(error.message, true);
@@ -1051,9 +1107,6 @@ function populateProjectSettings() {
   const settings = state.project.publicBrowser || {};
   $("#project-target-url").value = state.project.url || "";
   $("#public-browser-enabled").checked = Boolean(settings.enabled);
-  $("#public-browser-url").value = settings.url || "";
-  $("#public-browser-url").placeholder =
-    state.project.url || "留空使用目标网页";
   $("#public-browser-username").value = settings.username || "";
   $("#public-browser-password").value = "";
   $("#public-browser-password").placeholder = settings.passwordConfigured
@@ -1070,14 +1123,18 @@ $("#project-settings-form").onsubmit = async (event) => {
     checkIdle();
     const password = $("#public-browser-password").value,
       url = $("#project-target-url").value,
-      targetChanged = url !== (state.project?.url || "");
+      targetChanged =
+        url !== (state.project?.url || "") ||
+        $("#public-browser-username").value !==
+          (state.project?.publicBrowser?.username || "") ||
+        Boolean(password) ||
+        $("#clear-public-password").checked;
     await api(requireProject(), {
       method: "PATCH",
       body: JSON.stringify({
         url,
         publicBrowser: {
           enabled: $("#public-browser-enabled").checked,
-          url: $("#public-browser-url").value,
           username: $("#public-browser-username").value,
           ...($("#clear-public-password").checked
             ? { password: "" }
@@ -1101,3 +1158,195 @@ $("#project-settings-form").onsubmit = async (event) => {
     submit.disabled = false;
   }
 };
+
+function publicationLabel(item) {
+  return item?.status === "published"
+    ? `已发布 · v${item.version}`
+    : item?.status === "withdrawn"
+      ? "已撤回"
+      : "未发布";
+}
+function reviewPublication(doc) {
+  requireProject();
+  state.reviewDocument = { ...doc, projectKey: state.project.key };
+  $("#publication-title").textContent = doc.title;
+  $("#publication-reviewed").checked = false;
+  $("#publication-error").textContent = "";
+  $("#publication-review").showModal();
+}
+$("#close-publication-review").onclick = () => $("#publication-review").close();
+$("#publication-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const submit = event.target.querySelector("button.primary");
+  submit.disabled = true;
+  try {
+    const doc = state.reviewDocument;
+    if (!doc || doc.projectKey !== state.project?.key)
+      throw Error("项目已切换，请重新预览并审核。");
+    await post(requireProject() + "/publications", {
+      kind: doc.kind,
+      id: doc.id,
+      reviewed: $("#publication-reviewed").checked,
+    });
+    $("#publication-review").close();
+    await loadView();
+    notice("指南已审核发布，用户可以在快速上手中阅读。");
+  } catch (error) {
+    $("#publication-error").textContent = error.message;
+  } finally {
+    submit.disabled = false;
+  }
+};
+function publicRoute(route) {
+  return (
+    route +
+    (route.includes("?") ? "&" : "?") +
+    new URLSearchParams(
+      state.publicProject ? { project: state.publicProject } : {},
+    )
+  );
+}
+async function publicApi(route) {
+  const response = await fetch(publicRoute(route));
+  const data = await response.json();
+  if (!response.ok) throw Error(data.error || "内容暂时无法读取");
+  return data;
+}
+function setPublicView(view) {
+  state.publicView = view;
+  document
+    .querySelectorAll("[data-public-panel]")
+    .forEach((panel) => (panel.hidden = panel.dataset.publicPanel !== view));
+  document.querySelectorAll("[data-public-view]").forEach((button) => {
+    const selected = button.dataset.publicView === view;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+}
+document
+  .querySelectorAll("[data-public-view]")
+  .forEach(
+    (button) =>
+      (button.onclick = () => setPublicView(button.dataset.publicView)),
+  );
+async function initializePublic() {
+  const params = new URLSearchParams(location.search);
+  state.publicProject = params.get("project");
+  const config = await publicApi("/api/v1/public/config");
+  state.publicProject = config.projectKey;
+  $("#user-submit").disabled = false;
+  $("#user-title").textContent = config.name;
+  params.set("project", config.projectKey);
+  history.replaceState(null, "", location.pathname + "?" + params);
+  $("#recommended").replaceChildren();
+  for (const question of config.recommendedQuestions)
+    $("#recommended").append(
+      button(question, () => {
+        $("#user-question").value = question;
+      }),
+    );
+  const data = await publicApi("/api/v1/public/guides");
+  state.publicGuides = data.items;
+  $("#public-guide-count").textContent = data.items.length + " 份";
+  const requested = params.get("guide");
+  state.publicGuide = data.items.some((item) => item.id === requested)
+    ? requested
+    : data.items[0]?.id || null;
+  if (requested && !data.items.some((item) => item.id === requested)) {
+    $("#public-guide-detail").replaceChildren(
+      node("p", "这份指南尚未发布或已经撤回。", "empty"),
+    );
+    state.publicGuide = null;
+  }
+  renderPublicGuideList();
+  if (state.publicGuide) await readPublicGuide(state.publicGuide);
+  else if (!requested) {
+    const target = $("#public-guide-detail");
+    target.replaceChildren(
+      node(
+        "p",
+        "当前项目尚无公开指南，可以先通过 QA 问答了解具体操作。",
+        "empty",
+      ),
+      button("前往 QA 问答", () => setPublicView("qa")),
+    );
+  }
+  setPublicView(params.get("tab") === "qa" ? "qa" : "guides");
+}
+function renderPublicGuideList() {
+  $("#public-guide-list").replaceChildren();
+  for (const guide of state.publicGuides)
+    $("#public-guide-list").append(
+      record(
+        guide.title,
+        `${guide.moduleCount} 个模块`,
+        `v${guide.version}`,
+        state.publicGuide === guide.id,
+        () =>
+          readPublicGuide(guide.id).catch((error) =>
+            $("#public-guide-detail").replaceChildren(
+              node("p", error.message, "error"),
+            ),
+          ),
+      ),
+    );
+}
+async function readPublicGuide(id) {
+  const epoch = ++state.publicEpoch;
+  state.publicGuide = id;
+  renderPublicGuideList();
+  const target = $("#public-guide-detail");
+  target.replaceChildren(node("p", "正在读取指南……", "muted"));
+  const guide = await publicApi("/api/v1/public/guides/" + id);
+  if (epoch !== state.publicEpoch) return;
+  const params = new URLSearchParams(location.search);
+  params.set("guide", id);
+  history.replaceState(null, "", location.pathname + "?" + params);
+  target.replaceChildren(
+    node("span", `已发布 · v${guide.version}`, "badge"),
+    node("h2", guide.title),
+  );
+  if (guide.summary) target.append(node("p", guide.summary));
+  if (guide.modules.length > 1) {
+    const contents = node("nav", undefined, "guide-contents");
+    contents.setAttribute("aria-label", "指南目录");
+    for (const [index, module] of guide.modules.entries()) {
+      const link = node("a", module.title);
+      link.href = "#guide-module-" + index;
+      contents.append(link);
+    }
+    target.append(contents);
+  }
+  for (const limitation of guide.limitations)
+    target.append(node("p", limitation, "muted"));
+  for (const [index, module] of guide.modules.entries()) {
+    const section = node("section", undefined, "doc-section");
+    section.id = "guide-module-" + index;
+    section.append(node("h3", module.title));
+    if (module.summary) section.append(node("p", module.summary));
+    for (const [stepIndex, step] of module.steps.entries()) {
+      section.append(
+        node("h3", `${stepIndex + 1}. ${step.title}`),
+        node("p", step.instruction),
+      );
+      if (step.imageId) {
+        const img = document.createElement("img");
+        img.alt = step.title;
+        img.loading = "lazy";
+        img.src = publicRoute(
+          `/api/v1/public/guides/${guide.id}/images/${step.imageId}?version=${guide.version}`,
+        );
+        img.onerror = () =>
+          img.replaceWith(
+            node(
+              "p",
+              "图片暂不可用，请刷新查看指南是否已更新或撤回。",
+              "muted",
+            ),
+          );
+        section.append(img);
+      }
+    }
+    target.append(section);
+  }
+}

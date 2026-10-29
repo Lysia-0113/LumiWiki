@@ -14,8 +14,6 @@ import { config, ensure, HttpError } from "./config.js";
 
 export interface PublicBrowserSettings {
   enabled: boolean;
-  /** null follows the project's target URL. */
-  url: string | null;
   username: string;
   password: string;
 }
@@ -28,14 +26,12 @@ export interface Project {
   publicBrowser?: PublicBrowserSettings;
 }
 export function publicBrowserSettings(project: Project): PublicBrowserSettings {
-  return (
-    project.publicBrowser ?? {
-      enabled: process.env.PUBLIC_BROWSER_ENABLED === "true",
-      url: null,
-      username: process.env.PUBLIC_TEST_USERNAME || "",
-      password: process.env.PUBLIC_TEST_PASSWORD || "",
-    }
-  );
+  const settings = project.publicBrowser;
+  return {
+    enabled: settings?.enabled ?? process.env.PUBLIC_BROWSER_ENABLED === "true",
+    username: settings?.username ?? process.env.PUBLIC_TEST_USERNAME ?? "",
+    password: settings?.password ?? process.env.PUBLIC_TEST_PASSWORD ?? "",
+  };
 }
 function websiteUrl(value: unknown): string | null {
   ensure(value === null || typeof value === "string", "网址无效");
@@ -64,7 +60,11 @@ function parsePublicBrowser(
     ensure(typeof data.enabled === "boolean", "问答探索开关无效");
     result.enabled = data.enabled;
   }
-  if (data.url !== undefined) result.url = websiteUrl(data.url);
+  ensure(
+    data.url === undefined || data.url === null || data.url === "",
+    "快速上手与问答共用目标网页，请修改项目目标网页",
+    400,
+  );
   for (const field of ["username", "password"] as const) {
     if (data[field] !== undefined) {
       ensure(
@@ -172,7 +172,8 @@ export async function updateProject(
 export async function migrateProjectSettings() {
   const projects = await listProjects();
   for (const project of projects) {
-    if (!project.publicBrowser) await updateProject(project.key, {});
+    if (!project.publicBrowser || "url" in project.publicBrowser)
+      await updateProject(project.key, {});
   }
   return projects;
 }
