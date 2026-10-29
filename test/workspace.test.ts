@@ -79,6 +79,7 @@ test("三栏目工作台接入真实产物、文字 QA 生成/编辑/审核、�
     {
       question: "保存后的笔记还可以修改吗？",
       answer: "找到对应笔记，打开操作菜单并选择编辑。",
+      aliases: ["存过的笔记能编辑吗？"],
       status: "draft",
     },
     { guideId, moduleId: "notes", documentId: docId, references: [] },
@@ -134,14 +135,24 @@ test("三栏目工作台接入真实产物、文字 QA 生成/编辑/审核、�
       .filter({ hasText: qa.question })
       .click();
     assert.equal(await page.locator("#qa-detail img").count(), 0);
+    await page.getByRole("button", { name: "停用", exact: true }).click();
+    await page.getByRole("button", { name: "启用", exact: true }).waitFor();
     await page.getByRole("button", { name: "编辑答案", exact: true }).click();
     await page.locator("#qa-form textarea").fill("修改后的纯文字操作步骤。");
     await page.locator("#qa-form button.primary").click();
-    await page.getByRole("button", { name: "✓ 通过审核", exact: true }).click();
-    await page.getByRole("button", { name: "退回草稿", exact: true }).waitFor();
+    await page
+      .getByRole("button", { name: "✓ 标记已核验", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "取消人工核验", exact: true })
+      .waitFor();
     const edited = (await listQa(first.key)).find((item) => item.id === qa.id)!;
     assert.equal(edited.status, "verified");
     assert.equal(edited.source?.guideId, guideId);
+    assert.equal(edited.enabled, false, "编辑和核验不能启用停用QA");
+    assert.deepEqual(edited.aliases, qa.aliases);
+    await page.getByRole("button", { name: "启用", exact: true }).click();
+    await page.getByRole("button", { name: "停用", exact: true }).waitFor();
     await page.locator("#new-qa").click();
     await page.locator('#qa-form [name="question"]').fill("手工新增的问题");
     await page.locator("#qa-form textarea").fill("手工文字答案");
@@ -188,6 +199,7 @@ test("三栏目工作台接入真实产物、文字 QA 生成/编辑/审核、�
       fullPage: true,
     });
     await page.locator("#open-config").click();
+    await page.locator("#wiki-files .empty").waitFor();
     await page.locator("#wiki-upload").setInputFiles({
       name: "workspace.md",
       mimeType: "text/markdown",
@@ -224,33 +236,91 @@ test("三栏目工作台接入真实产物、文字 QA 生成/编辑/审核、�
       .filter({ hasText: "修改后的纯文字操作步骤。" })
       .waitFor();
     assert.equal(await publicPage.locator("#user-messages img").count(), 0);
+    await publicPage.locator(".qa-review-label.verified").waitFor();
+    assert.equal(
+      (await listQa(first.key)).filter((item) => item.question === qa.question)
+        .length,
+      1,
+    );
+    assert.equal(
+      (await listQa(first.key)).find((item) => item.id === qa.id)?.usage
+        ?.directAnswers,
+      1,
+    );
+    await publicPage.locator("#user-question").fill("如何设置个人头像？");
+    await publicPage.locator("#user-submit").click();
+    await publicPage.waitForFunction(
+      () =>
+        !(document.querySelector("#user-submit") as HTMLButtonElement).disabled,
+    );
+    assert.match(
+      (await publicPage.locator(".qa-review-label").last().textContent()) || "",
+      /尚未经人工核验/,
+    );
     const userQa = (await listQa(first.key)).find(
-      (item) => item.origin === "public" && item.question === qa.question,
+      (item) =>
+        item.origin === "public" && item.question === "如何设置个人头像？",
     )!;
     assert.equal(userQa.status, "draft");
     await page.reload();
     await page.locator('#nav [data-view="qa"]').click();
     await page
       .locator("#qa-list button")
-      .filter({ hasText: qa.question })
+      .filter({ hasText: userQa.question })
       .filter({ hasText: "来自用户问答" })
       .click();
-    assert.equal(await page.locator("#qa-detail .badge").textContent(), "待审核");
     assert.equal(
-      await page.locator("#qa-detail .source-label").textContent(),
+      await page.locator("#qa-detail .badge").first().textContent(),
+      "尚未人工核验",
+    );
+    assert.equal(
+      await page
+        .locator("#qa-detail .source-label")
+        .filter({ hasText: "来自：" })
+        .textContent(),
       "来自：用户问答",
     );
     await page
       .locator("#qa-detail")
-      .getByRole("button", { name: "✓ 通过审核" })
+      .getByRole("button", { name: "✓ 标记已核验" })
       .click();
     await page
       .locator("#qa-detail .badge")
-      .filter({ hasText: "已审核" })
+      .filter({ hasText: "已人工核验" })
       .waitFor();
     assert.equal(
       (await listQa(first.key)).find((item) => item.id === userQa.id)?.status,
       "verified",
+    );
+    await publicPage.locator("#user-question").fill(userQa.question);
+    await publicPage.locator("#user-submit").click();
+    await publicPage.waitForFunction(
+      () =>
+        !(document.querySelector("#user-submit") as HTMLButtonElement).disabled,
+    );
+    assert.equal(
+      await publicPage.locator(".qa-review-label").last().textContent(),
+      "已人工核验",
+    );
+    await page
+      .getByRole("button", { name: "取消人工核验", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "✓ 标记已核验", exact: true })
+      .waitFor();
+    assert.equal(
+      (await listQa(first.key)).find((item) => item.id === userQa.id)?.enabled,
+      true,
+    );
+    await publicPage.locator("#user-question").fill(userQa.question);
+    await publicPage.locator("#user-submit").click();
+    await publicPage.waitForFunction(
+      () =>
+        !(document.querySelector("#user-submit") as HTMLButtonElement).disabled,
+    );
+    assert.match(
+      (await publicPage.locator(".qa-review-label").last().textContent()) || "",
+      /尚未经人工核验/,
     );
     await page.setViewportSize({ width: 390, height: 1000 });
     assert.equal(

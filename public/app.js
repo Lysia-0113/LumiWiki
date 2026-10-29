@@ -31,7 +31,7 @@ const state = {
 };
 const descriptions = {
   guides: ["快速上手", "创建、阅读和管理这个项目的上手指南。"],
-  qa: ["QA 问答", "用户问答、指南整理和人工添加的答案，在这里统一审核。"],
+  qa: ["QA 问答", "可用问答统一参与召回；人工核验与启用状态分别管理。"],
   config: ["项目配置", "项目、知识库和运行状态集中管理。"],
 };
 const toolLabels = {
@@ -248,7 +248,9 @@ function record(title, meta, status, selected, fn) {
     node(
       "span",
       status,
-      ["待审核", "待复核", "未发布", "已撤回"].includes(status)
+      ["待审核", "待复核", "未发布", "已撤回"].includes(status) ||
+        status.includes("未核验") ||
+        status.includes("停用")
         ? "badge draft"
         : "badge",
     ),
@@ -444,12 +446,12 @@ function renderQa() {
     $("#qa-list").append(
       record(
         qa.question,
-        qa.origin === "public"
+        (qa.origin === "public"
           ? "来自用户问答"
           : qa.source
             ? "来自指南整理"
-            : "人工 / 助手整理",
-        qa.status === "verified" ? "已审核" : "待审核",
+            : "人工 / 助手整理") + ` · 复用 ${qa.usage?.directAnswers || 0} 次`,
+        `${qa.status === "verified" ? "已核验" : "未核验"} · ${qa.enabled ? "可用" : "停用"}`,
         state.selectedQa === qa.id,
         () => {
           state.selectedQa = qa.id;
@@ -470,14 +472,28 @@ function renderQa() {
     );
     return;
   }
-  target.append(
+  const badges = node("div", undefined, "row");
+  badges.append(
     node(
       "span",
-      qa.status === "verified" ? "已审核" : "待审核",
+      qa.status === "verified" ? "已人工核验" : "尚未人工核验",
       qa.status === "verified" ? "badge" : "badge draft",
     ),
+    node(
+      "span",
+      qa.enabled ? "可用" : "已停用",
+      qa.enabled ? "badge" : "badge draft",
+    ),
+  );
+  target.append(
+    badges,
     node("h2", qa.question),
     node("p", qa.answer, "text-answer"),
+    node(
+      "p",
+      `直答复用 ${qa.usage?.directAnswers || 0} 次${qa.usage?.lastUsedAt ? " · 最近使用：" + new Date(qa.usage.lastUsedAt).toLocaleString() : ""}`,
+      "source-label",
+    ),
   );
   if (qa.origin === "public")
     target.append(node("p", "来自：用户问答", "source-label"));
@@ -493,16 +509,25 @@ function renderQa() {
   actions.append(
     button("编辑答案", () => editQa(qa)),
     button(
-      qa.status === "verified" ? "退回草稿" : "✓ 通过审核",
+      qa.status === "verified" ? "取消人工核验" : "✓ 标记已核验",
       async () => {
-        await post(requireProject() + "/qa", {
-          ...qa,
-          status: qa.status === "verified" ? "draft" : "verified",
+        await api(requireProject() + "/qa/" + qa.id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            status: qa.status === "verified" ? "draft" : "verified",
+          }),
         });
         await loadView();
       },
       qa.status === "verified" ? "" : "primary",
     ),
+    button(qa.enabled ? "停用" : "启用", async () => {
+      await api(requireProject() + "/qa/" + qa.id, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: !qa.enabled }),
+      });
+      await loadView();
+    }),
     button("删除", async () => {
       if (confirm("删除这条问答？")) {
         await api(requireProject() + "/qa/" + qa.id, { method: "DELETE" });
@@ -511,6 +536,15 @@ function renderQa() {
     }),
   );
   target.append(actions);
+  if (qa.usage?.recentQuestions.length) {
+    const samples = node("details", undefined, "qa-question-samples");
+    samples.append(node("summary", "最近复用时的实际问法"));
+    const list = node("ol");
+    for (const question of [...qa.usage.recentQuestions].reverse())
+      list.append(node("li", question));
+    samples.append(list);
+    target.append(samples);
+  }
 }
 function editQa(qa) {
   const form = $("#qa-form");
@@ -664,6 +698,20 @@ async function stream(
   }
   const answer = node("div", "", "message answer");
   target.append(answer);
+  const reviewLabel = isPublic ? node("p", "", "qa-review-label") : null;
+  if (reviewLabel) {
+    reviewLabel.hidden = true;
+    target.append(reviewLabel);
+  }
+  const showReview = (status) => {
+    if (!reviewLabel) return;
+    const verified = status === "verified";
+    reviewLabel.textContent = verified
+      ? "已人工核验"
+      : "尚未经人工核验，回答可能存在错误，请结合实际情况判断。";
+    reviewLabel.className = "qa-review-label" + (verified ? " verified" : "");
+    reviewLabel.hidden = false;
+  };
   const reader = response.body.getReader(),
     decoder = new TextDecoder();
   let buffer = "",
@@ -695,12 +743,17 @@ async function stream(
               2000,
             );
         }
-        if (event.type === "text") answer.textContent += event.text;
+        if (event.type === "qa") showReview(event.qa.status);
+        if (event.type === "text") {
+          answer.textContent += event.text;
+          showReview("draft");
+        }
         if (event.type === "done") {
           resultReceived = true;
           state.lastResult = event.result;
           finalAnswer = event.result.answer;
           answer.textContent = finalAnswer;
+          showReview(event.result.qaStatus);
         }
         if (event.type === "guide" || event.type === "document")
           onArtifact(event);
@@ -824,7 +877,7 @@ async function runQa(event) {
     state.selectedQa = saved.id;
     $("#qa-question").value = "";
     await loadView();
-    notice("文字问答已保存为草稿，审核后可用于用户直答。");
+    notice("文字问答已保存，可用于用户直答，并标记为尚未人工核验。");
   } catch (error) {
     notice(
       error.name === "AbortError"
@@ -957,7 +1010,7 @@ $("#qa-form").onsubmit = async (event) => {
     state.selectedQa = saved.id;
     $("#qa-editor").close();
     await loadView();
-    notice("文字问答已保存为草稿。");
+    notice("文字问答已保存，人工核验标记已重置，可用状态保持不变。");
   } catch (error) {
     notice(error.message, true);
   }

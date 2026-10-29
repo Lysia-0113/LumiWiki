@@ -137,7 +137,7 @@ test("独立原生Pi整理草稿：并发合并、拒绝跨模块/伪造引用�
         (q) => q.status === "draft" && q.source?.guideId === guide.id,
       ),
     );
-    assert.equal((await matchQa(p.key, "如何提交？")).decision, "agent");
+    assert.equal((await matchQa(p.key, "如何提交？")).decision, "direct");
     const original = saved.find((q) => q.question === "如何提交？")!;
     const reviewed = await saveQa(p.key, { ...original, status: "verified" });
     assert.deepEqual(reviewed.source, original.source);
@@ -217,7 +217,7 @@ test("八模块总限额为20，并为后续模块保留名额", async () => {
   }
 });
 
-test("真实浏览器与原生Pi：指南汇总后宿主自动启动QA会话，草稿不参与直答", async () => {
+test("真实浏览器与原生Pi：指南汇总后宿主自动启动QA会话，未核验QA默认可复用", async () => {
   const web = http.createServer((_req, res) => {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.end("<h1>账户概览</h1><p>当前余额100元</p>");
@@ -323,10 +323,12 @@ test("真实浏览器与原生Pi：指南汇总后宿主自动启动QA会话，�
       1,
     );
     assert.ok(
-      events.find((e) => e.type === "done")?.result.answer.includes("QA 草稿"),
+      events
+        .find((e) => e.type === "done")
+        ?.result.answer.includes("未核验 QA"),
     );
     assert.equal((await listQa(p.key)).length, 1);
-    assert.equal((await matchQa(p.key, "在哪里查看余额？")).decision, "agent");
+    assert.equal((await matchQa(p.key, "在哪里查看余额？")).decision, "direct");
     assert.equal(calls, 9);
   } finally {
     await close();

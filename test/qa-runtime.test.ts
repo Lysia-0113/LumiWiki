@@ -38,6 +38,11 @@ const modelUrl = await listen(
     let raw = "";
     for await (const chunk of req) raw += chunk;
     const input: Request = JSON.parse(raw);
+    if (req.url?.endsWith("/embeddings")) {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ data: [{ embedding: [1, 0] }] }));
+      return;
+    }
     requests.push(input);
     if (replyMode === "error") {
       res.writeHead(400, { "Content-Type": "application/json" });
@@ -239,14 +244,20 @@ test("未导入 Wiki 时两端 QA 仍可运行，不声明不存在的读取工�
   assert.ok(!system(user).includes("目录（按 pageId"));
 });
 
-test("每次用户回答进入所属项目待审核，审核前不公开，审核和编辑保留来源", async () => {
+test("首次AI回答保存为可用未核验QA；后续直接复用，状态独立且不产生重复条目", async () => {
   const project = await createProject({
     name: "用户回答审核",
     publicBrowser: { enabled: false },
   });
   reads = [];
   const question = "怎么查找之前的笔记？";
-  await ask(project.key, true);
+  const firstEvents = await eventsFor(project.key, true);
+  assert.equal(requests.length, 1);
+  assert.equal(
+    firstEvents.find((e) => e.type === "done")?.result.qaStatus,
+    "draft",
+  );
+  assert.equal(firstEvents.find((e) => e.type === "qa")?.tier, "generated");
   const getQa = async (isPublic: boolean) => {
     const response = await fetch(
       appUrl +
@@ -262,13 +273,15 @@ test("每次用户回答进入所属项目待审核，审核前不公开，审�
   assert.equal(draft.question, question);
   assert.equal(draft.answer, answer);
   assert.equal(draft.status, "draft");
+  assert.equal(draft.enabled, true);
   assert.equal(draft.origin, "public");
-  assert.deepEqual(await getQa(true), []);
-  assert.equal((await matchQa(project.key, question)).decision, "agent");
+  assert.equal((await getQa(true))[0].status, "draft");
+  assert.equal((await matchQa(project.key, question)).decision, "direct");
 
   await ask(project.key, true);
-  assert.equal(requests.length, 1, "未审核回答不能代替 Agent 直答");
-  assert.equal((await getQa(false)).length, 2, "每次成功回答单独进入待审核");
+  assert.equal(requests.length, 0, "未核验答案可复用，不调用 Agent");
+  assert.equal((await getQa(false)).length, 1, "直答不产生重复QA");
+  assert.equal((await getQa(false))[0].usage.directAnswers, 1);
 
   const update = async (input: unknown) => {
     const response = await fetch(appUrl + `/api/projects/${project.key}/qa`, {
@@ -289,18 +302,59 @@ test("每次用户回答进入所属项目待审核，审核前不公开，审�
     status: "draft",
   });
   assert.equal(edited.origin, "public");
-  await update({ ...edited, status: "verified" });
+  const patch = async (input: unknown) => {
+    const response = await fetch(
+      appUrl + `/api/projects/${project.key}/qa/${draft.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-QA-Admin-Token": config.token,
+        },
+        body: JSON.stringify(input),
+      },
+    );
+    assert.ok(response.ok);
+    return response.json();
+  };
+  await Promise.all([patch({ status: "verified" }), patch({ enabled: false })]);
+  const [disabled] = await getQa(false);
+  assert.equal(disabled.status, "verified");
+  assert.equal(disabled.enabled, false);
+  assert.equal(disabled.usage.directAnswers, 1);
+  assert.deepEqual(await getQa(true), []);
+  assert.equal((await matchQa(project.key, question)).decision, "agent");
+  const publicConfig = await (
+    await fetch(appUrl + `/api/v1/public/config?project=${project.key}`)
+  ).json();
+  assert.deepEqual(publicConfig.recommendedQuestions, []);
+  await patch({ enabled: true });
   assert.equal((await getQa(true)).length, 1);
   const events = await eventsFor(project.key, true);
   assert.equal(requests.length, 0, "审核后复用已有答案，不调用模型");
   assert.ok(events.some((e) => e.type === "qa" && e.qa.id === draft.id));
+  assert.equal(
+    events.find((e) => e.type === "done")?.result.qaStatus,
+    "verified",
+  );
   const saved = await getQa(false);
-  assert.equal(saved.length, 3, "直答也记录用户实际收到的问题和回答");
-  assert.equal(saved.filter((q: any) => q.status === "draft").length, 2);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].usage.directAnswers, 2);
   assert.equal(saved.find((q: any) => q.id === draft.id).status, "verified");
+  await patch({ status: "draft" });
+  assert.equal((await getQa(false))[0].enabled, true);
+  assert.equal((await getQa(true))[0].status, "draft");
+  await Promise.all(
+    Array.from({ length: 5 }, () => eventsFor(project.key, true)),
+  );
+  assert.equal(
+    (await getQa(false))[0].usage.directAnswers,
+    7,
+    "并发计数不丢失",
+  );
 });
 
-test("直答记录用户实际提问，支持完整长问题且不覆盖已审核条目", async () => {
+test("直答把完整实际问法记入原QA，不产生重复条目或改动核验状态", async () => {
   const project = await createProject({
     name: "直答记录",
     publicBrowser: { enabled: false },
@@ -316,11 +370,46 @@ test("直答记录用户实际提问，支持完整长问题且不覆盖已审�
   assert.ok(events.some((e) => e.type === "done"));
   assert.equal(requests.length, 0);
   const all = await listQa(project.key);
-  const draft = all.find((q) => q.origin === "public")!;
-  assert.equal(draft.question, question);
-  assert.equal(draft.answer, answer);
-  assert.equal(draft.status, "draft");
+  assert.equal(all.length, 1);
+  assert.deepEqual(all[0].usage?.recentQuestions, [question]);
+  assert.equal(all[0].usage?.directAnswers, 1);
   assert.equal(all.find((q) => q.id === verified.id)?.status, "verified");
+});
+test("未核验QA可通过语义匹配复用，停用候选不影响匹配或生成重复QA", async () => {
+  const project = await createProject({
+    name: "未核验语义复用",
+    publicBrowser: { enabled: false },
+  });
+  const qa = await saveQa(project.key, {
+    question: "怎么找以前的笔记？",
+    answer,
+  });
+  await saveQa(project.key, {
+    question: "停用的问题",
+    answer: "停用答案",
+    enabled: false,
+  });
+  const keys = ["EMBEDDING_BASE_URL", "EMBEDDING_API_KEY", "EMBEDDING_MODEL"];
+  const previous = keys.map((key) => process.env[key]);
+  Object.assign(process.env, {
+    EMBEDDING_BASE_URL: modelUrl + "/v1",
+    EMBEDDING_API_KEY: "fixture",
+    EMBEDDING_MODEL: "fixture",
+  });
+  try {
+    const events = await eventsFor(project.key, true, "在哪里搜索旧笔记？");
+    const hit = events.find((e) => e.type === "qa");
+    assert.equal(hit.qa.id, qa.id);
+    assert.equal(hit.qa.status, "draft");
+    assert.equal(hit.tier, "high");
+    assert.equal(requests.length, 0, "语义命中不调用回答模型");
+    assert.equal((await listQa(project.key)).length, 2);
+  } finally {
+    keys.forEach((key, i) => {
+      if (previous[i] === undefined) delete process.env[key];
+      else process.env[key] = previous[i];
+    });
+  }
 });
 
 test("模型失败和空答案不会写入待审核 QA", async () => {

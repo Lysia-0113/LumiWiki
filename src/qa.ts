@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readdir } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { randomUUID, createHash } from "node:crypto";
 import { config, ensure } from "./config.js";
 import { atomic, json, projectDir } from "./store.js";
@@ -11,7 +11,13 @@ export interface Qa {
   answer: string;
   aliases: string[];
   status: "draft" | "verified";
+  enabled: boolean;
   createdAt: string;
+  usage?: {
+    directAnswers: number;
+    lastUsedAt: string;
+    recentQuestions: string[];
+  };
   origin?: "public";
   source?: {
     guideId: string;
@@ -21,6 +27,41 @@ export interface Qa {
   };
   vector?: number[];
   embeddingConfig?: string;
+}
+const qaWrites = new Map<string, Promise<unknown>>();
+const qaFile = (projectId: string, id: string) => {
+  ensure(/^[a-f0-9-]{36}$/.test(id), "问答ID无效");
+  return path.join(projectDir(projectId), "qa", id + ".json");
+};
+const withDefaults = (qa: Qa): Qa => ({ ...qa, enabled: qa.enabled !== false });
+async function readQa(projectId: string, id: string) {
+  return withDefaults(await json<Qa>(qaFile(projectId, id)));
+}
+// Serialize content, state and usage writes so one update cannot undo another.
+async function writeQa<T>(
+  projectId: string,
+  id: string,
+  update: () => Promise<T>,
+) {
+  const key = qaFile(projectId, id);
+  const pending = qaWrites.get(key) || Promise.resolve();
+  const task = pending.catch(() => {}).then(update);
+  qaWrites.set(key, task);
+  try {
+    return await task;
+  } finally {
+    if (qaWrites.get(key) === task) qaWrites.delete(key);
+  }
+}
+function validateState(input: { status?: Qa["status"]; enabled?: boolean }) {
+  ensure(
+    input.status === undefined || ["draft", "verified"].includes(input.status),
+    "问答状态无效",
+  );
+  ensure(
+    input.enabled === undefined || typeof input.enabled === "boolean",
+    "可用状态无效",
+  );
 }
 export const normalize = (s: string) =>
   s
@@ -45,7 +86,11 @@ export async function listQa(projectId: string): Promise<Qa[]> {
     return await Promise.all(
       (await readdir(path.join(projectDir(projectId), "qa")))
         .filter((f) => /^[a-f0-9-]{36}\.json$/.test(f))
-        .map((f) => json<Qa>(path.join(projectDir(projectId), "qa", f))),
+        .map(async (f) =>
+          withDefaults(
+            await json<Qa>(path.join(projectDir(projectId), "qa", f)),
+          ),
+        ),
     );
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
@@ -60,6 +105,7 @@ export async function saveQa(
     answer: string;
     aliases?: string[];
     status?: "draft" | "verified";
+    enabled?: boolean;
   },
   source?: Qa["source"],
   origin?: Qa["origin"],
@@ -72,38 +118,103 @@ export async function saveQa(
     "问答内容无效",
   );
   ensure(!input.id || /^[a-f0-9-]{36}$/.test(input.id), "问答ID无效");
-  ensure(
-    !input.status || ["draft", "verified"].includes(input.status),
-    "问答状态无效",
-  );
+  validateState(input);
   ensure(
     !input.aliases ||
       (Array.isArray(input.aliases) &&
         input.aliases.every((x) => typeof x === "string")),
     "别名无效",
   );
-  let previous: Qa | undefined;
-  if (input.id) {
-    try {
-      previous = await json<Qa>(
-        path.join(projectDir(projectId), "qa", input.id + ".json"),
-      );
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+  const id = input.id || randomUUID();
+  return writeQa(projectId, id, async () => {
+    let previous: Qa | undefined;
+    if (input.id) {
+      try {
+        previous = await readQa(projectId, id);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      }
     }
-  }
-  const qa: Qa = {
-    id: input.id || randomUUID(),
-    question: input.question.trim(),
-    answer: input.answer.trim(),
-    aliases: input.aliases || [],
-    status: input.status || "draft",
-    createdAt: previous?.createdAt || new Date().toISOString(),
-    origin: previous?.origin || origin,
-    source: previous?.source || source,
-  };
-  await atomic(path.join(projectDir(projectId), "qa", qa.id + ".json"), qa);
-  return qa;
+    const qa: Qa = {
+      id,
+      question: input.question.trim(),
+      answer: input.answer.trim(),
+      aliases: input.aliases ?? previous?.aliases ?? [],
+      status: input.status || "draft",
+      enabled: input.enabled ?? previous?.enabled ?? true,
+      createdAt: previous?.createdAt || new Date().toISOString(),
+      origin: previous?.origin || origin,
+      source: previous?.source || source,
+      usage: previous?.usage,
+    };
+    await atomic(qaFile(projectId, id), qa);
+    return qa;
+  });
+}
+export async function updateQaState(
+  projectId: string,
+  id: string,
+  input: { status?: Qa["status"]; enabled?: boolean },
+) {
+  validateState(input);
+  ensure(
+    input.status !== undefined || input.enabled !== undefined,
+    "请指定审核或可用状态",
+  );
+  return writeQa(projectId, id, async () => {
+    const previous = await readQa(projectId, id);
+    const qa = {
+      ...previous,
+      status: input.status ?? previous.status,
+      enabled: input.enabled ?? previous.enabled,
+    };
+    await atomic(qaFile(projectId, id), qa);
+    return qa;
+  });
+}
+export async function deleteQa(projectId: string, id: string) {
+  return writeQa(projectId, id, async () => {
+    await rm(qaFile(projectId, id), { force: true });
+    await rm(path.join(projectDir(projectId), "qa", `embedding_${id}.json`), {
+      force: true,
+    });
+  });
+}
+export async function recordQaUse(
+  projectId: string,
+  matched: Qa,
+  question: string,
+) {
+  return writeQa(projectId, matched.id, async () => {
+    let current: Qa;
+    try {
+      current = await readQa(projectId, matched.id);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw e;
+    }
+    // A state/content edit during retrieval must take effect before serving it.
+    if (
+      !current.enabled ||
+      current.question !== matched.question ||
+      current.answer !== matched.answer ||
+      JSON.stringify(current.aliases) !== JSON.stringify(matched.aliases)
+    )
+      return;
+    const qa: Qa = {
+      ...current,
+      usage: {
+        directAnswers: (current.usage?.directAnswers || 0) + 1,
+        lastUsedAt: new Date().toISOString(),
+        recentQuestions: [
+          ...(current.usage?.recentQuestions || []),
+          question,
+        ].slice(-10),
+      },
+    };
+    await atomic(qaFile(projectId, matched.id), qa);
+    return qa;
+  });
 }
 export async function completion(
   prefix: string,
@@ -167,7 +278,12 @@ export async function matchQa(
   question: string,
   signal?: AbortSignal,
 ) {
-  const all = (await listQa(projectId)).filter((q) => q.status === "verified");
+  const all = (await listQa(projectId))
+    .filter((q) => q.enabled)
+    .sort(
+      (a, b) =>
+        Number(b.status === "verified") - Number(a.status === "verified"),
+    );
   const query = normalize(question);
   const exact = all.find((q) =>
     [q.question, ...q.aliases].some((x) => normalize(x) === query),
@@ -261,4 +377,5 @@ export const publicQa = (q: Qa) => ({
   question: q.question,
   answer: q.answer,
   aliases: q.aliases,
+  status: q.status,
 });

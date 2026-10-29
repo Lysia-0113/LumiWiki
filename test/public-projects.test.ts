@@ -305,7 +305,7 @@ test("只接受一个目标网页；改网址会换会话，关闭探索和已�
     }),
     /共用目标网页/,
   );
-  await publicAsk();
+  await publicAsk("原地址如何创建备忘录？");
   assert.deepEqual(logins.at(-1), {
     site: "/shared-target/",
     username: "test-user",
@@ -319,7 +319,7 @@ test("只接受一个目标网页；改网址会换会话，关闭探索和已�
     },
     "PATCH",
   );
-  await publicAsk();
+  await publicAsk("新地址如何创建备忘录？");
   assert.equal(logins.at(-1)?.site, "/moved/");
   await api(
     `/api/projects/${p.key}`,
@@ -327,7 +327,7 @@ test("只接受一个目标网页；改网址会换会话，关闭探索和已�
     "PATCH",
   );
   const before = visits.length;
-  await publicAsk();
+  await publicAsk("关闭探索后如何创建备忘录？");
   assert.equal(visits.length, before);
   await api(
     `/api/projects/${p.key}`,
@@ -561,7 +561,8 @@ test("快速上手与用户探索复用同一登录会话；并发连接只创�
     "PATCH",
   );
   assert.equal(current.page.isClosed(), true);
-  await publicAsk();
+  // Exercise browser fallback instead of reusing the answer generated above.
+  await publicAsk("更换账号后如何创建备忘录？");
   assert.equal(logins.at(-1)?.username, "changed-user");
   assert.equal(logins.at(-1)?.password, "changed-secret");
 });

@@ -40,7 +40,15 @@ import {
   wikiTask,
   importGeneratedWiki,
 } from "./deepwiki.js";
-import { listQa, matchQa, publicQa, saveQa } from "./qa.js";
+import {
+  deleteQa,
+  listQa,
+  matchQa,
+  publicQa,
+  recordQaUse,
+  saveQa,
+  updateQaState,
+} from "./qa.js";
 import { generateGuideQa } from "./quick-start-qa.js";
 import {
   listPublications,
@@ -315,8 +323,13 @@ export function createServer() {
           send(res, 201, await saveQa(id, await body(req)));
           return;
         }
-        if (/^qa\/[a-f0-9-]{36}$/.test(sub) && method === "DELETE") {
-          await rm(path.join(projectDir(id), sub + ".json"), { force: true });
+        const qaId = sub.match(/^qa\/([a-f0-9-]{36})$/);
+        if (qaId && method === "PATCH") {
+          send(res, 200, await updateQaState(id, qaId[1], await body(req)));
+          return;
+        }
+        if (qaId && method === "DELETE") {
+          await deleteQa(id, qaId[1]);
           send(res, 200, { ok: true });
           return;
         }
@@ -495,7 +508,12 @@ export function createServer() {
             projectKey: project.key,
             name: project.name,
             recommendedQuestions: (await listQa(active))
-              .filter((q) => q.status === "verified")
+              .filter((q) => q.enabled)
+              .sort(
+                (a, b) =>
+                  Number(b.status === "verified") -
+                  Number(a.status === "verified"),
+              )
               .slice(0, 6)
               .map((q) => q.question),
           });
@@ -527,7 +545,7 @@ export function createServer() {
         if (route === "/api/v1/public/qa" && method === "GET") {
           send(res, 200, {
             items: (await listQa(active))
-              .filter((q) => q.status === "verified")
+              .filter((q) => q.enabled)
               .map(publicQa),
           });
           return;
@@ -548,7 +566,7 @@ export function createServer() {
             if (!res.destroyed)
               res.write("data: " + JSON.stringify(e) + "\n\n");
           };
-          const reviewAnswer = (answer: string) =>
+          const saveAnswer = (answer: string) =>
             saveQa(
               active,
               { question: data.question, answer, status: "draft" },
@@ -561,19 +579,24 @@ export function createServer() {
           }, 15000);
           try {
             const matched = await matchQa(active, data.question, abort.signal);
-            if (matched.decision === "direct" && matched.qa) {
-              await reviewAnswer(matched.qa.answer);
+            abort.signal.throwIfAborted();
+            const reused =
+              matched.decision === "direct" && matched.qa
+                ? await recordQaUse(active, matched.qa, data.question)
+                : undefined;
+            if (reused) {
               emit({
                 type: "qa",
-                qa: publicQa(matched.qa),
+                qa: publicQa(reused),
                 tier: matched.tier,
                 score: matched.score,
               });
               emit({
                 type: "done",
                 result: {
-                  answer: matched.qa.answer,
-                  qaId: matched.qa.id,
+                  answer: reused.answer,
+                  qaId: reused.id,
+                  qaStatus: reused.status,
                   sessionId: null,
                 },
               });
@@ -606,8 +629,17 @@ export function createServer() {
                 "回答为空，未保存草稿",
                 502,
               );
-              await reviewAnswer(result.answer);
-              emit(completed);
+              abort.signal.throwIfAborted();
+              const saved = await saveAnswer(result.answer);
+              emit({ type: "qa", qa: publicQa(saved), tier: "generated" });
+              emit({
+                ...completed,
+                result: {
+                  ...(completed.result as Record<string, unknown>),
+                  qaId: saved.id,
+                  qaStatus: saved.status,
+                },
+              });
             }
           } catch (e) {
             emit({

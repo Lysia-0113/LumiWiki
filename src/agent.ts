@@ -1194,7 +1194,7 @@ export async function ask(
       );
       const note =
         job.status === "completed"
-          ? `\n\n已整理 ${job.qaIds.length} 条 QA 草稿，可到「QA 问答」审核后用于直答。`
+          ? `\n\n已整理 ${job.qaIds.length} 条未核验 QA，默认可用于直答，可到「QA 问答」核验或停用。`
           : "\n\n指南已保存；QA 整理未完成，可到「快速上手」选中指南单独重试。";
       answer += note;
       emit({ type: "text", text: note });

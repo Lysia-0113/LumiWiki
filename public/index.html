@@ -126,7 +126,9 @@
           <section data-panel="qa" hidden>
             <details class="surface qa-compose">
               <summary>向助手提问，生成文字问答</summary>
-              <p>回答会保存为待审核草稿。需要核对页面时，可以连接目标网页。</p>
+              <p>
+                回答保存后默认可用，并标记为尚未人工核验。需要核对页面时，可以连接目标网页。
+              </p>
               <form id="qa-ask-form" class="stack">
                 <label for="qa-question">问题</label
                 ><textarea
@@ -361,8 +363,10 @@
             maxlength="30000"
           ></textarea>
         </label>
-        <p class="muted">保存为待审核草稿，审核通过后才用于用户直答。</p>
-        <button class="primary">保存草稿</button>
+        <p class="muted">
+          保存后标记为未核验，可用问答参与用户直答；停用的问答保持停用。
+        </p>
+        <button class="primary">保存问答</button>
       </form>
     </dialog>
   </body>

@@ -389,6 +389,20 @@ small,
 .message.answer {
   background: #f5f6f2;
 }
+.qa-review-label {
+  margin: -5px 0 4px;
+  padding: 0 16px;
+  color: #846334;
+  font-size: 12px;
+}
+.qa-review-label.verified {
+  color: var(--muted);
+}
+.qa-question-samples {
+  margin-top: 20px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
 .event {
   font-size: 12px;
   color: var(--muted);

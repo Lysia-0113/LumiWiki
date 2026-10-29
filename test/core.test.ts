@@ -22,7 +22,14 @@ import {
   wikiContext,
 } from "../src/knowledge.js";
 import { ask, disposeConversations } from "../src/agent.js";
-import { cosine, matchQa, saveQa } from "../src/qa.js";
+import {
+  cosine,
+  listQa,
+  matchQa,
+  recordQaUse,
+  saveQa,
+  updateQaState,
+} from "../src/qa.js";
 import { projectSkills, runPrompt } from "../src/skills.js";
 
 const tmp = await mkdtemp(path.join(os.tmpdir(), "lumiwiki-test-"));
@@ -83,16 +90,62 @@ test("同名导入替换旧版本，小库全文注入不截断 20k–30k 的单
   assert.equal(page.truncated, true);
   await assert.rejects(readPage(p.key, first.pages[0].id));
 });
-test("草稿不参与直答，已审核问答支持规范化精确匹配", async () => {
+test("可用问答不论核验状态都支持精确匹配；停用与核验互不影响", async () => {
   const p = await createProject({ name: "qa" });
   const q = await saveQa(p.key, { question: "如何预约？", answer: "先登录。" });
+  assert.equal((await matchQa(p.key, "如何预约")).decision, "direct");
+  await updateQaState(p.key, q.id, { enabled: false });
+  await updateQaState(p.key, q.id, { status: "verified" });
+  assert.equal((await listQa(p.key))[0].enabled, false);
   assert.equal((await matchQa(p.key, "如何预约")).decision, "agent");
-  await saveQa(p.key, { ...q, status: "verified" });
+  await updateQaState(p.key, q.id, { enabled: true });
   const matched = await matchQa(p.key, "如何预约");
   assert.equal(matched.decision, "direct");
   assert.equal(matched.tier, "exact");
+  assert.equal(matched.qa?.status, "verified");
   assert.equal(cosine([1, 0], [0, 1]), 0);
   assert.throws(() => cosine([1], [1, 2]));
+});
+test("旧QA默认可用，精确匹配优先人工核验；编辑保留其他问法和停用状态", async () => {
+  const p = await createProject({ name: "旧qa" });
+  const draft = await saveQa(p.key, {
+    question: "如何预约？",
+    answer: "AI答案",
+    aliases: ["怎么订课？"],
+  });
+  const file = path.join(projectDir(p.key), "qa", draft.id + ".json");
+  const legacy = JSON.parse(await readFile(file, "utf8"));
+  delete legacy.enabled;
+  await writeFile(file, JSON.stringify(legacy));
+  assert.equal((await listQa(p.key))[0].enabled, true);
+  assert.equal((await matchQa(p.key, "怎么订课？")).qa?.id, draft.id);
+  const verified = await saveQa(p.key, {
+    question: draft.question,
+    answer: "人工答案",
+    status: "verified",
+  });
+  assert.equal((await matchQa(p.key, draft.question)).qa?.id, verified.id);
+  await updateQaState(p.key, draft.id, { enabled: false });
+  const edited = await saveQa(p.key, {
+    id: draft.id,
+    question: draft.question,
+    answer: "编辑答案",
+  });
+  assert.deepEqual(edited.aliases, draft.aliases);
+  assert.equal(edited.enabled, false);
+  assert.equal(await recordQaUse(p.key, draft, draft.question), undefined);
+  await assert.rejects(
+    saveQa(p.key, {
+      question: "无效",
+      answer: "无效",
+      enabled: "false" as any,
+    }),
+    /可用状态无效/,
+  );
+  await assert.rejects(
+    updateQaState(p.key, draft.id, { status: "invalid" as any }),
+    /问答状态无效/,
+  );
 });
 test("实际 Pi SDK 完成工具调用循环与 SSE 文本事件（本地协议桩，无付费模型）", async () => {
   const repo = path.join(tmp, "sdk-repo");
@@ -166,7 +219,10 @@ test("实际 Pi SDK 完成工具调用循环与 SSE 文本事件（本地协议�
               finish_reason: "stop",
             };
     assert.ok(input.messages);
-    assert.equal(input.max_tokens ?? input.max_completion_tokens, config.quickStartMaxTokens);
+    assert.equal(
+      input.max_tokens ?? input.max_completion_tokens,
+      config.quickStartMaxTokens,
+    );
     if (calls === 2)
       assert.ok(
         JSON.stringify(input.messages).includes(
@@ -251,7 +307,12 @@ test("中相似度 Judge 只能选择已提供的候选，不能把第二条答�
   const second = await saveQa(p.key, {
     question: "候选二",
     answer: "第二条答案",
-    status: "verified",
+    status: "draft",
+  });
+  await saveQa(p.key, {
+    question: "停用候选",
+    answer: "不能被选择",
+    enabled: false,
   });
   let valid = true;
   const server = http.createServer(async (req, res) => {
