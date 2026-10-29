@@ -4,6 +4,7 @@ export const config = {
   port: Number(process.env.PORT || 3000),
   data: path.resolve(process.env.DATA_DIR || ".webdemo"),
   token: process.env.QA_ADMIN_TOKEN || "",
+  vision: process.env.LLM_VISION === "true",
   llm: {
     baseUrl: process.env.LLM_BASE_URL || "",
     key: process.env.LLM_API_KEY || "",
@@ -11,9 +12,9 @@ export const config = {
   },
   wikiLimit: Number(process.env.WIKI_FULL_INJECT_MAX_CHARS || 30000),
   maxTools: Number(process.env.MAX_TOOL_CALLS || 30),
-  quickStartMaxTools: Number(process.env.QUICK_START_MAX_TOOL_CALLS || 120),
+  quickStartMaxTools: Number(process.env.QUICK_START_MAX_TOOL_CALLS || 200),
   quickStartMaxTokens: Number(process.env.QUICK_START_MAX_TOKENS || 8192),
-  guidePlanMaxTools: Number(process.env.GUIDE_PLAN_MAX_TOOL_CALLS || 60),
+  guidePlanMaxTools: Number(process.env.GUIDE_PLAN_MAX_TOOL_CALLS || 100),
   guideChapterTimeout: Number(
     process.env.GUIDE_CHAPTER_TIMEOUT_SECONDS || 1800,
   ),

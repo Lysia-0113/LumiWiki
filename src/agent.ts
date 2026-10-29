@@ -12,8 +12,14 @@ import {
 import { Type } from "typebox";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { config, ensure } from "./config.js";
-import { atomic, projectDir, type Project } from "./store.js";
+import {
+  atomic,
+  projectDir,
+  publicBrowserSettings,
+  type Project,
+} from "./store.js";
 import {
   evidenceKey,
   qaFinishSchema,
@@ -47,6 +53,7 @@ import {
 } from "./quick-start.js";
 import {
   act,
+  capturePageImage,
   getBrowser,
   observe,
   screenshot,
@@ -157,6 +164,25 @@ async function createConversation(
       details: {},
     };
   };
+  const vision =
+    publicMode && process.env.PUBLIC_LLM_VISION !== undefined
+      ? process.env.PUBLIC_LLM_VISION === "true"
+      : config.vision;
+  const imageResult = (value: unknown, image: Buffer) => ({
+    ...textResult(value),
+    content: [
+      ...textResult(value).content,
+      {
+        type: "image" as const,
+        data: image.toString("base64"),
+        mimeType: "image/png",
+      },
+    ],
+  });
+  const observationResult = async (value: unknown) =>
+    vision && browser
+      ? imageResult(value, await capturePageImage(browser))
+      : textResult(value);
   const id = randomUUID();
   const ledger = new Set<string>(wiki.full ? wiki.pages.map((p) => p.id) : []);
   if (answerMode && wiki.full)
@@ -423,7 +449,7 @@ async function createConversation(
           async execute(_id, p) {
             budget();
             quickStart.mutated(true);
-            return textResult(await navigateRef(browser, p.ref));
+            return await observationResult(await navigateRef(browser, p.ref));
           },
         }),
       );
@@ -437,7 +463,7 @@ async function createConversation(
         parameters: Type.Object({}),
         async execute() {
           budget();
-          return textResult(await observe(browser));
+          return await observationResult(await observe(browser));
         },
       }),
     );
@@ -502,7 +528,9 @@ async function createConversation(
           const result = await act(browser, p);
           if (guide?.phase === "chapter" && !explorationAction(p.action))
             guide.pendingAction = undefined;
-          return textResult(result);
+          return ["navigate", "back"].includes(p.action)
+            ? await observationResult(result)
+            : textResult(result);
         },
       }),
     );
@@ -526,7 +554,12 @@ async function createConversation(
           screenshotIds.add(a.id);
           quickStart.capture(a.id, a.revision, a.evidenceId);
           c.emit({ type: "artifact", artifact: a });
-          return textResult(a);
+          return vision
+            ? imageResult(
+                a,
+                await readFile(path.join(root, "artifacts", a.id + ".png")),
+              )
+            : textResult(a);
         },
       }),
     );
@@ -573,11 +606,8 @@ async function createConversation(
           },
         }),
       );
-    if (
-      publicMode &&
-      process.env.PUBLIC_TEST_USERNAME &&
-      process.env.PUBLIC_TEST_PASSWORD
-    )
+    const credentials = publicBrowserSettings(project);
+    if (publicMode && credentials.username && credentials.password)
       tools.push(
         defineTool({
           name: "browser_login",
@@ -594,14 +624,10 @@ async function createConversation(
             for (const r of [p.usernameRef, p.passwordRef, p.submitRef])
               ensure(browser.refs.has(r), "登录控件 ref 无效");
             quickStart.mutated(true);
-            await resolveRef(browser, p.usernameRef).fill(
-              process.env.PUBLIC_TEST_USERNAME!,
-            );
-            await resolveRef(browser, p.passwordRef).fill(
-              process.env.PUBLIC_TEST_PASSWORD!,
-            );
+            await resolveRef(browser, p.usernameRef).fill(credentials.username);
+            await resolveRef(browser, p.passwordRef).fill(credentials.password);
             await resolveRef(browser, p.submitRef).click();
-            return textResult(await observe(browser));
+            return await observationResult(await observe(browser));
           },
         }),
       );
@@ -976,7 +1002,7 @@ async function createConversation(
         id: llm.model,
         name: llm.model,
         reasoning: false,
-        input: ["text"],
+        input: vision ? ["text", "image"] : ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: Number(process.env.LLM_CONTEXT_WINDOW || 64000),
         maxTokens: Number(process.env.LLM_MAX_TOKENS || 4096),

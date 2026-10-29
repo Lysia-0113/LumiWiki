@@ -12,7 +12,10 @@ import {
   json,
   listProjects,
   projectDir,
+  publicBrowserSettings,
+  updateProject,
   validId,
+  type Project,
 } from "./store.js";
 import { deleteWiki, importWiki, listWiki, parseWiki } from "./knowledge.js";
 import {
@@ -20,8 +23,10 @@ import {
   closeBrowser,
   closeAllBrowsers,
   closeProjectBrowsers,
+  connectProjectBrowser,
   getBrowser,
   observe,
+  projectBrowserBusy,
 } from "./browser.js";
 import { ask, disposeConversations } from "./agent.js";
 import {
@@ -46,6 +51,13 @@ import { generateGuideQa } from "./quick-start-qa.js";
 import { guideTaskActive } from "./guide-workflow.js";
 
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
+function adminProject(project: Project) {
+  const { password, ...settings } = publicBrowserSettings(project);
+  return {
+    ...project,
+    publicBrowser: { ...settings, passwordConfigured: Boolean(password) },
+  };
+}
 const send = (res: ServerResponse, status: number, value: unknown) => {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -174,13 +186,13 @@ export function createServer() {
         );
       if (route === "/api/projects" && method === "GET") {
         send(res, 200, {
-          projects: await listProjects(),
+          projects: (await listProjects()).map(adminProject),
           activeProjectId: await activeProject(),
         });
         return;
       }
       if (route === "/api/projects" && method === "POST") {
-        send(res, 201, await createProject(await body(req)));
+        send(res, 201, adminProject(await createProject(await body(req))));
         return;
       }
       const match = route.match(
@@ -193,13 +205,17 @@ export function createServer() {
         if (sub === "activate" && method === "POST") {
           const old = await activeProject();
           if (old && old !== id) {
+            ensure(
+              !projectBrowserBusy(old),
+              "项目浏览器正在使用，请稍后切换",
+              409,
+            );
             await disposeConversations(old);
-            await closeProjectBrowsers(old);
           }
           await atomic(path.join(config.data, "deployment.json"), {
             activeProjectId: id,
           });
-          send(res, 200, project);
+          send(res, 200, adminProject(project));
           return;
         }
         if (sub === "wiki" && method === "GET") {
@@ -334,7 +350,7 @@ export function createServer() {
           return;
         }
         if (!sub && method === "GET") {
-          send(res, 200, project);
+          send(res, 200, adminProject(project));
           return;
         }
         if (!sub && method === "DELETE") {
@@ -350,24 +366,29 @@ export function createServer() {
         }
         if (!sub && method === "PATCH") {
           const data = await body(req);
-          ensure(data.path === undefined, "源码路径创建后不可修改");
-          if (data.name !== undefined) {
-            ensure(
-              typeof data.name === "string" && data.name.trim(),
-              "名称无效",
-            );
-            project.name = data.name.trim();
+          const before = publicBrowserSettings(project);
+          const connectionChange =
+            (data.url !== undefined && data.url !== project.url) ||
+            (data.publicBrowser?.username !== undefined &&
+              data.publicBrowser.username !== before.username) ||
+            (data.publicBrowser?.password !== undefined &&
+              data.publicBrowser.password !== before.password);
+          ensure(
+            !connectionChange || !projectBrowserBusy(id),
+            "浏览器正在使用，请结束当前任务后修改网址或登录信息",
+            409,
+          );
+          const updated = await updateProject(id, data);
+          const after = publicBrowserSettings(updated);
+          if (
+            updated.url !== project.url ||
+            before.username !== after.username ||
+            before.password !== after.password
+          ) {
+            await disposeConversations(id);
+            await closeProjectBrowsers(id);
           }
-          if (data.url !== undefined) {
-            ensure(
-              typeof data.url === "string" &&
-                ["http:", "https:"].includes(new URL(data.url).protocol),
-              "网址无效",
-            );
-            project.url = data.url;
-          }
-          await atomic(path.join(projectDir(id), "project.json"), project);
-          send(res, 200, project);
+          send(res, 200, adminProject(updated));
           return;
         }
       }
@@ -382,7 +403,11 @@ export function createServer() {
       }
       if (route === "/api/browser" && method === "POST") {
         const data = await body(req);
-        send(res, 201, await connectBrowser(await getProject(data.projectKey)));
+        send(
+          res,
+          201,
+          await connectProjectBrowser(await getProject(data.projectKey)),
+        );
         return;
       }
       const br = route.match(/^\/api\/browser\/([a-f0-9-]{36})$/);
@@ -499,13 +524,9 @@ export function createServer() {
                 },
               });
             } else {
-              if (process.env.PUBLIC_BROWSER_ENABLED === "true") {
-                ensure(
-                  process.env.PUBLIC_TEST_URL &&
-                    project.url === process.env.PUBLIC_TEST_URL,
-                  "公共探索必须绑定专用测试网址",
-                );
-                browserId = (await connectBrowser(project, true)).id;
+              const settings = publicBrowserSettings(project);
+              if (settings.enabled) {
+                browserId = (await connectProjectBrowser(project)).id;
               }
               let completed: Record<string, unknown> | undefined;
               await ask(
@@ -570,12 +591,13 @@ export function createServer() {
           } catch (e) {
             emit({
               type: "error",
-              error: "当前无法完成回答，请联系管理员检查模型和测试环境配置。",
+              error:
+                e instanceof HttpError && e.status === 409
+                  ? "共享浏览器正在处理其他任务，请稍后重试。"
+                  : "当前无法完成回答，请联系管理员检查模型和测试环境配置。",
             });
           } finally {
             clearInterval(keep);
-            if (browserId)
-              await closeBrowser(browserId, active).catch(() => {});
             res.end();
           }
           return;

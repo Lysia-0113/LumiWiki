@@ -1,7 +1,7 @@
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { ensure } from "./config.js";
 import { atomic, projectDir, type Project } from "./store.js";
 import type { ScreenshotArtifact } from "./artifacts.js";
@@ -23,6 +23,7 @@ export interface BrowserSession {
   context: BrowserContext;
   page: Page;
   origin: string;
+  targetUrl: string;
   observed: Set<string>;
   refs: Set<string>;
   seenControls: Set<string>;
@@ -30,6 +31,39 @@ export interface BrowserSession {
   busy: boolean;
 }
 const sessions = new Map<string, BrowserSession>();
+const opening = new Map<string, Promise<{ id: string; url: string }>>();
+export function projectBrowserBusy(projectId: string) {
+  return [...sessions.values()].some(
+    (session) => session.projectId === projectId && session.busy,
+  );
+}
+export async function connectProjectBrowser(
+  project: Project,
+  headless = process.env.BROWSER_HEADLESS === "true",
+) {
+  ensure(project.url, "请先为项目配置目标网页");
+  const pending = opening.get(project.key);
+  if (pending) return pending;
+  const current = [...sessions.values()].find(
+    (session) =>
+      session.projectId === project.key &&
+      session.targetUrl === project.url &&
+      !session.page.isClosed(),
+  );
+  if (current) return { id: current.id, url: current.page.url() };
+  ensure(
+    sessions.size + opening.size < 10,
+    "浏览器会话已满，请关闭已有会话",
+    429,
+  );
+  const created = connectBrowser(project, headless);
+  opening.set(project.key, created);
+  try {
+    return await created;
+  } finally {
+    if (opening.get(project.key) === created) opening.delete(project.key);
+  }
+}
 export async function connectBrowser(
   project: Project,
   headless = process.env.BROWSER_HEADLESS === "true",
@@ -43,6 +77,8 @@ export async function connectBrowser(
     acceptDownloads: false,
   });
   const origin = new URL(project.url).origin;
+  context.setDefaultTimeout(10000);
+  context.setDefaultNavigationTimeout(20000);
   await context.route("**/*", async (route) => {
     const request = route.request();
     if (
@@ -60,6 +96,7 @@ export async function connectBrowser(
     context,
     page,
     origin,
+    targetUrl: project.url,
     observed: new Set(),
     refs: new Set(),
     seenControls: new Set(),
@@ -163,19 +200,25 @@ export async function observe(
       .slice(-8)) {
       const popup = await s.page
         .getByRef(menu.ref!)
-        .evaluate((el) => {
-          if (el.closest('nav, aside, [role="navigation"], [role="menubar"]'))
+        .evaluate(
+          (el) => {
+            if (el.closest('nav, aside, [role="navigation"], [role="menubar"]'))
+              return false;
+            let current: Element | null = el;
+            while (current && current !== el.ownerDocument.body) {
+              if (
+                ["absolute", "fixed"].includes(
+                  getComputedStyle(current).position,
+                )
+              )
+                return true;
+              current = current.parentElement;
+            }
             return false;
-          let current: Element | null = el;
-          while (current && current !== el.ownerDocument.body) {
-            if (
-              ["absolute", "fixed"].includes(getComputedStyle(current).position)
-            )
-              return true;
-            current = current.parentElement;
-          }
-          return false;
-        })
+          },
+          undefined,
+          { timeout: 1000 },
+        )
         .catch(() => false);
       if (popup && (!focus || nodes.indexOf(menu) > nodes.indexOf(focus)))
         focus = menu;
@@ -259,73 +302,78 @@ export async function observe(
     candidates.slice(0, 200).map(async (entry) => {
       const meta = await s.page
         .getByRef(entry.nativeRef)
-        .evaluate((el) => {
-          const input = el as HTMLInputElement;
-          const summary = el.tagName === "SUMMARY";
-          const expanded = el.getAttribute("aria-expanded");
-          const popup = el.getAttribute("aria-haspopup");
-          const details = summary
-            ? (el.parentElement as HTMLDetailsElement)
-            : null;
-          const rect = el.getBoundingClientRect();
-          return {
-            tag: el.tagName.toLowerCase(),
-            type: input.type || "",
-            disabled:
-              Boolean(input.disabled) ||
-              el.getAttribute("aria-disabled") === "true",
-            expanded:
-              expanded === null
-                ? details
-                  ? details.open
-                  : undefined
-                : expanded === "true",
-            expandable:
-              expanded !== null ||
-              summary ||
-              Boolean(popup && popup !== "false"),
-            hasPopup: popup || undefined,
-            controls: el.getAttribute("aria-controls") || undefined,
-            required:
-              Boolean(input.required) ||
-              el.getAttribute("aria-required") === "true",
-            readOnly: Boolean(input.readOnly),
-            invalid:
-              el.getAttribute("aria-invalid") === "true" ||
-              ("validity" in input && !input.validity.valid),
-            description: (el.getAttribute("aria-describedby") || "")
-              .split(/\s+/)
-              .map(
-                (id) => el.ownerDocument.getElementById(id)?.textContent || "",
-              )
-              .join(" ")
-              .trim()
-              .slice(0, 500),
-            placeholder: input.placeholder || undefined,
-            options:
-              el.tagName === "SELECT"
-                ? Array.from((el as HTMLSelectElement).options)
-                    .slice(0, 50)
-                    .map((option) => ({
-                      label: option.label,
-                      value: option.value,
-                      selected: option.selected,
-                      disabled: option.disabled,
-                    }))
-                : undefined,
-            inViewport:
-              rect.bottom > 0 &&
-              rect.right > 0 &&
-              rect.top < window.innerHeight &&
-              rect.left < window.innerWidth,
-            scroll: {
-              top: el.scrollTop,
-              left: el.scrollLeft,
-              maxY: Math.max(0, el.scrollHeight - el.clientHeight),
-              maxX: Math.max(0, el.scrollWidth - el.clientWidth),
-            },
-          };
-        })
+        .evaluate(
+          (el) => {
+            const input = el as HTMLInputElement;
+            const summary = el.tagName === "SUMMARY";
+            const expanded = el.getAttribute("aria-expanded");
+            const popup = el.getAttribute("aria-haspopup");
+            const details = summary
+              ? (el.parentElement as HTMLDetailsElement)
+              : null;
+            const rect = el.getBoundingClientRect();
+            return {
+              tag: el.tagName.toLowerCase(),
+              type: input.type || "",
+              disabled:
+                Boolean(input.disabled) ||
+                el.getAttribute("aria-disabled") === "true",
+              expanded:
+                expanded === null
+                  ? details
+                    ? details.open
+                    : undefined
+                  : expanded === "true",
+              expandable:
+                expanded !== null ||
+                summary ||
+                Boolean(popup && popup !== "false"),
+              hasPopup: popup || undefined,
+              controls: el.getAttribute("aria-controls") || undefined,
+              required:
+                Boolean(input.required) ||
+                el.getAttribute("aria-required") === "true",
+              readOnly: Boolean(input.readOnly),
+              invalid:
+                el.getAttribute("aria-invalid") === "true" ||
+                ("validity" in input && !input.validity.valid),
+              description: (el.getAttribute("aria-describedby") || "")
+                .split(/\s+/)
+                .map(
+                  (id) =>
+                    el.ownerDocument.getElementById(id)?.textContent || "",
+                )
+                .join(" ")
+                .trim()
+                .slice(0, 500),
+              placeholder: input.placeholder || undefined,
+              options:
+                el.tagName === "SELECT"
+                  ? Array.from((el as HTMLSelectElement).options)
+                      .slice(0, 50)
+                      .map((option) => ({
+                        label: option.label,
+                        value: option.value,
+                        selected: option.selected,
+                        disabled: option.disabled,
+                      }))
+                  : undefined,
+              inViewport:
+                rect.bottom > 0 &&
+                rect.right > 0 &&
+                rect.top < window.innerHeight &&
+                rect.left < window.innerWidth,
+              scroll: {
+                top: el.scrollTop,
+                left: el.scrollLeft,
+                maxY: Math.max(0, el.scrollHeight - el.clientHeight),
+                maxX: Math.max(0, el.scrollWidth - el.clientWidth),
+              },
+            };
+          },
+          undefined,
+          { timeout: 1000 },
+        )
         .catch(() => ({
           tag: "unknown",
           type: "",
@@ -567,6 +615,13 @@ export async function navigateRef(s: BrowserSession, ref: string) {
     .catch(() => {});
   return observe(s);
 }
+// Observation images do not refresh refs or count as verified guide evidence.
+export async function capturePageImage(s: BrowserSession) {
+  return s.page.screenshot({
+    scale: "css",
+    mask: [s.page.locator('input[type="password"], [data-private]')],
+  });
+}
 export async function screenshot(
   s: BrowserSession,
   revision = 0,
@@ -600,10 +655,8 @@ export async function screenshot(
       }),
     )
   ).flat();
-  await s.page.screenshot({
-    path: path.join(dir, id + ".png"),
-    scale: "css",
-    mask: [s.page.locator('input[type="password"], [data-private]')],
+  await writeFile(path.join(dir, id + ".png"), await capturePageImage(s), {
+    mode: 0o600,
   });
   const result: ScreenshotArtifact = {
     id,
@@ -620,11 +673,13 @@ export async function screenshot(
   return result;
 }
 export async function closeAllBrowsers() {
+  await Promise.allSettled([...opening.values()]);
   await Promise.allSettled(
     [...sessions.values()].map((s) => s.context.close()),
   );
 }
 export async function closeProjectBrowsers(projectId: string) {
+  await opening.get(projectId)?.catch(() => {});
   await Promise.allSettled(
     [...sessions.values()]
       .filter((s) => s.projectId === projectId)
