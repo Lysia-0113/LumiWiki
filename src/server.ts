@@ -548,6 +548,13 @@ export function createServer() {
             if (!res.destroyed)
               res.write("data: " + JSON.stringify(e) + "\n\n");
           };
+          const reviewAnswer = (answer: string) =>
+            saveQa(
+              active,
+              { question: data.question, answer, status: "draft" },
+              undefined,
+              "public",
+            );
           let browserId: string | undefined;
           const keep = setInterval(() => {
             if (!res.destroyed) res.write(": keepalive\n\n");
@@ -555,6 +562,7 @@ export function createServer() {
           try {
             const matched = await matchQa(active, data.question, abort.signal);
             if (matched.decision === "direct" && matched.qa) {
+              await reviewAnswer(matched.qa.answer);
               emit({
                 type: "qa",
                 qa: publicQa(matched.qa),
@@ -574,20 +582,32 @@ export function createServer() {
               if (settings.enabled) {
                 browserId = (await connectProjectBrowser(project)).id;
               }
+              let completed: Record<string, unknown> | undefined;
               await ask(
                 project,
                 { question: data.question, browserId },
                 (e) => {
-                  if (
-                    ["text", "answer_start", "error", "done"].includes(
-                      String(e.type),
-                    )
+                  if (e.type === "done") completed = e;
+                  else if (
+                    ["text", "answer_start", "error"].includes(String(e.type))
                   )
                     emit(e);
                 },
                 abort.signal,
                 true,
               );
+              const result = completed?.result as
+                | { answer?: unknown }
+                | undefined;
+              ensure(
+                completed &&
+                  typeof result?.answer === "string" &&
+                  result.answer.trim(),
+                "回答为空，未保存草稿",
+                502,
+              );
+              await reviewAnswer(result.answer);
+              emit(completed);
             }
           } catch (e) {
             emit({

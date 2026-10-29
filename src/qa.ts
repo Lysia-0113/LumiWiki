@@ -12,6 +12,7 @@ export interface Qa {
   aliases: string[];
   status: "draft" | "verified";
   createdAt: string;
+  origin?: "public";
   source?: {
     guideId: string;
     moduleId: string;
@@ -61,11 +62,12 @@ export async function saveQa(
     status?: "draft" | "verified";
   },
   source?: Qa["source"],
+  origin?: Qa["origin"],
 ) {
   ensure(
     input.question?.trim() &&
       input.answer?.trim() &&
-      input.question.length < 4000 &&
+      input.question.length <= 16000 &&
       input.answer.length < 30000,
     "问答内容无效",
   );
@@ -97,6 +99,7 @@ export async function saveQa(
     aliases: input.aliases || [],
     status: input.status || "draft",
     createdAt: previous?.createdAt || new Date().toISOString(),
+    origin: previous?.origin || origin,
     source: previous?.source || source,
   };
   await atomic(path.join(projectDir(projectId), "qa", qa.id + ".json"), qa);

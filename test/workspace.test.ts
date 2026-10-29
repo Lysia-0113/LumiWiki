@@ -224,6 +224,34 @@ test("三栏目工作台接入真实产物、文字 QA 生成/编辑/审核、�
       .filter({ hasText: "修改后的纯文字操作步骤。" })
       .waitFor();
     assert.equal(await publicPage.locator("#user-messages img").count(), 0);
+    const userQa = (await listQa(first.key)).find(
+      (item) => item.origin === "public" && item.question === qa.question,
+    )!;
+    assert.equal(userQa.status, "draft");
+    await page.reload();
+    await page.locator('#nav [data-view="qa"]').click();
+    await page
+      .locator("#qa-list button")
+      .filter({ hasText: qa.question })
+      .filter({ hasText: "来自用户问答" })
+      .click();
+    assert.equal(await page.locator("#qa-detail .badge").textContent(), "待审核");
+    assert.equal(
+      await page.locator("#qa-detail .source-label").textContent(),
+      "来自：用户问答",
+    );
+    await page
+      .locator("#qa-detail")
+      .getByRole("button", { name: "✓ 通过审核" })
+      .click();
+    await page
+      .locator("#qa-detail .badge")
+      .filter({ hasText: "已审核" })
+      .waitFor();
+    assert.equal(
+      (await listQa(first.key)).find((item) => item.id === userQa.id)?.status,
+      "verified",
+    );
     await page.setViewportSize({ width: 390, height: 1000 });
     assert.equal(
       await page.evaluate(

@@ -31,7 +31,7 @@ const state = {
 };
 const descriptions = {
   guides: ["快速上手", "创建、阅读和管理这个项目的上手指南。"],
-  qa: ["QA 问答", "生成的问答与人工整理的答案，统一保存在这里。"],
+  qa: ["QA 问答", "用户问答、指南整理和人工添加的答案，在这里统一审核。"],
   config: ["项目配置", "项目、知识库和运行状态集中管理。"],
 };
 const toolLabels = {
@@ -444,7 +444,11 @@ function renderQa() {
     $("#qa-list").append(
       record(
         qa.question,
-        qa.source ? "来自指南整理" : "人工 / 助手整理",
+        qa.origin === "public"
+          ? "来自用户问答"
+          : qa.source
+            ? "来自指南整理"
+            : "人工 / 助手整理",
         qa.status === "verified" ? "已审核" : "待审核",
         state.selectedQa === qa.id,
         () => {
@@ -475,6 +479,8 @@ function renderQa() {
     node("h2", qa.question),
     node("p", qa.answer, "text-answer"),
   );
+  if (qa.origin === "public")
+    target.append(node("p", "来自：用户问答", "source-label"));
   if (qa.source)
     target.append(
       node(
