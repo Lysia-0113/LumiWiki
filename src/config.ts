@@ -4,6 +4,7 @@ export const config = {
   port: Number(process.env.PORT || 3000),
   data: path.resolve(process.env.DATA_DIR || ".webdemo"),
   token: process.env.QA_ADMIN_TOKEN || "",
+  vision: process.env.LLM_VISION === "true",
   llm: {
     baseUrl: process.env.LLM_BASE_URL || "",
     key: process.env.LLM_API_KEY || "",

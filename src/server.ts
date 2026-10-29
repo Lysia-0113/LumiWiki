@@ -121,7 +121,7 @@ export function createServer() {
         );
         res.setHeader(
           "Content-Security-Policy",
-          "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'",
+          "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'",
         );
         res.end(await readFile(path.join(publicDir, file)));
         return;
@@ -134,6 +134,7 @@ export function createServer() {
         const base = {
           name: "LumiWiki",
           modelConfigured: modelReady(),
+          visionConfigured: config.vision,
           embeddingConfigured: Boolean(process.env.EMBEDDING_MODEL),
           judgeConfigured: Boolean(process.env.QA_JUDGE_MODEL),
           publicModelConfigured: Boolean(process.env.PUBLIC_LLM_MODEL),
@@ -369,8 +370,8 @@ export function createServer() {
       if (route === "/api/ask" && method === "POST") {
         const data = await body(req);
         ensure(
-          ["chat", "quick_start"].includes(data.mode || "chat"),
-          "当前支持 chat / quick_start",
+          ["chat", "quick_start", "qa"].includes(data.mode || "chat"),
+          "当前支持 chat / quick_start / qa",
         );
         const project = await getProject(data.projectKey);
         res.writeHead(200, {

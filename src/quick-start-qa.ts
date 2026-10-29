@@ -103,7 +103,7 @@ async function generate(
     label: "保存问答草稿",
     executionMode: "sequential",
     description:
-      "从指南的一个模块整理一条问答；只保存草稿，继承该文档依据。每模块最多3条，总计最多20条。重复问题保留原条目，已审核内容不会被覆盖。",
+      "从指南的一个模块整理一条问答；答案必须为自包含的纯文字，说明控件名称和菜单路径，不嵌入图片、图片链接或HTML，不要求用户参看截图。只保存草稿，继承该文档依据。每模块最多3条，总计最多20条。重复问题保留原条目，已审核内容不会被覆盖。",
     parameters: Type.Object({
       moduleId: Type.String(),
       question: Type.String({ minLength: 1, maxLength: 160 }),
@@ -216,7 +216,11 @@ async function generate(
           moduleId: m.moduleId,
           title: m.title,
           summary: m.doc.summary,
-          steps: m.doc.steps,
+          steps: m.doc.steps.map(({ title, instruction, expectedResult }) => ({
+            title,
+            instruction,
+            expectedResult,
+          })),
           references: m.doc.references,
         })),
         existing: existingQa.map((q) => ({

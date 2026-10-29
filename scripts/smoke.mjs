@@ -47,7 +47,7 @@ try {
     () =>
       document.querySelector("#project-name").textContent === "临时联调项目",
   );
-  await page.locator('[data-view="knowledge"]').click();
+  await page.locator('#nav [data-view="config"]').click();
   await page.locator("#wiki-upload").setInputFiles({
     name: "smoke.md",
     mimeType: "text/markdown",
@@ -99,7 +99,7 @@ try {
   if (original.activeProjectId)
     await api(`/api/projects/${original.activeProjectId}/activate`, {});
   await page.locator("#refresh").click();
-  await page.locator('[data-view="overview"]').click();
+  await page.locator('#nav [data-view="guides"]').click();
   await page.waitForTimeout(300);
   await mkdir(".webdemo/verification", { recursive: true });
   await page.screenshot({

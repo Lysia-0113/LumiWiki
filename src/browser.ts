@@ -1,7 +1,7 @@
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { ensure } from "./config.js";
 import { atomic, projectDir, type Project } from "./store.js";
 import type { ScreenshotArtifact } from "./artifacts.js";
@@ -567,6 +567,13 @@ export async function navigateRef(s: BrowserSession, ref: string) {
     .catch(() => {});
   return observe(s);
 }
+// Observation images do not refresh refs or count as verified guide evidence.
+export async function capturePageImage(s: BrowserSession) {
+  return s.page.screenshot({
+    scale: "css",
+    mask: [s.page.locator('input[type="password"], [data-private]')],
+  });
+}
 export async function screenshot(
   s: BrowserSession,
   revision = 0,
@@ -600,10 +607,8 @@ export async function screenshot(
       }),
     )
   ).flat();
-  await s.page.screenshot({
-    path: path.join(dir, id + ".png"),
-    scale: "css",
-    mask: [s.page.locator('input[type="password"], [data-private]')],
+  await writeFile(path.join(dir, id + ".png"), await capturePageImage(s), {
+    mode: 0o600,
   });
   const result: ScreenshotArtifact = {
     id,

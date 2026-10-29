@@ -13,6 +13,7 @@ import {
   act,
   navigateRef,
   closeAllBrowsers,
+  capturePageImage,
 } from "../src/browser.js";
 
 const tmp = await mkdtemp(path.join(os.tmpdir(), "lumiwiki-browser-"));
@@ -44,6 +45,7 @@ test("浏览器快照包含真实层级和展开状态；密码遮挡，展开�
   assert.equal(account.expandable, true);
   assert.ok(account.path.some((p) => p.includes("业务导航")));
   assert.ok(!first.elements.some((e) => e.label === "充值记录"));
+  await capturePageImage(b);
   const opened = await act(b, { action: "expand", ref: account.ref });
   assert.ok(opened.elements.some((e) => e.label === "充值记录"));
   assert.ok(opened.elements.find((e) => e.label === "导出账单")?.disabled);
