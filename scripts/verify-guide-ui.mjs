@@ -71,6 +71,8 @@ try {
   await page.locator("#token").fill(config.token);
   await page.locator("#auth-form button").click();
   await page.locator("#admin").waitFor({ state: "visible" });
+  await page.locator('#nav [data-view="config"]').click();
+  await page.locator(".create-project summary").click();
   await page.locator('#project-form [name="name"]').fill("指南流程交互验证");
   await page
     .locator('#project-form [name="url"]')
@@ -81,7 +83,8 @@ try {
       document.querySelector("#project-name").textContent ===
       "指南流程交互验证",
   );
-  await page.locator('[data-view="agent"]').click();
+  await page.locator('#nav [data-view="guides"]').click();
+  await page.locator("#new-guide").click();
   await page.locator("#connect-browser").click();
   await page.waitForFunction(() =>
     document.querySelector("#browser-status").textContent.startsWith("已连接"),
@@ -105,29 +108,32 @@ try {
     path: path.join(runDir, "incomplete-guide.png"),
     fullPage: true,
   });
-  await page.locator('[data-view="documents"]').click();
+  await page.locator('#nav [data-view="guides"]').click();
   const resume = page.getByRole("button", { name: "继续 / 重试未完成章节" });
   await resume.waitFor();
   assert.ok(
-    (await page.locator("#outputs").textContent()).includes("目录尚未确定"),
+    (await page.locator("#guide-tasks").textContent()).includes("目录尚未确定"),
   );
   await page.screenshot({
     path: path.join(runDir, "task-recovery.png"),
     fullPage: true,
   });
   page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#notice").evaluate((element) => {
+    element.textContent = "";
+  });
   await resume.click();
   await page.waitForFunction(() =>
     document
       .querySelector("#notice")
-      .textContent.includes("仍有未完成或受限章节"),
+      .textContent.includes("指南尚未完整生成"),
   );
   assert.equal(modelCalls, 6);
   assert.equal(await page.locator("#ask-button").isEnabled(), true);
-  await page.locator('[data-view="documents"]').click();
+  await page.locator('#nav [data-view="guides"]').click();
   await resume.waitFor();
   assert.equal(
-    await page.locator("#outputs .item").count(),
+    await page.locator("#guide-tasks .item").count(),
     1,
     "resume updates the same task rather than duplicating it",
   );
