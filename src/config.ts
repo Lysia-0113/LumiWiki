@@ -13,6 +13,10 @@ export const config = {
   maxTools: Number(process.env.MAX_TOOL_CALLS || 30),
   quickStartMaxTools: Number(process.env.QUICK_START_MAX_TOOL_CALLS || 120),
   quickStartMaxTokens: Number(process.env.QUICK_START_MAX_TOKENS || 8192),
+  guidePlanMaxTools: Number(process.env.GUIDE_PLAN_MAX_TOOL_CALLS || 60),
+  guideChapterTimeout: Number(
+    process.env.GUIDE_CHAPTER_TIMEOUT_SECONDS || 1800,
+  ),
   timeout: Number(process.env.RUN_TIMEOUT_SECONDS || 180),
   deepwiki: (process.env.DEEPWIKI_BASE_URL || "http://127.0.0.1:8001").replace(
     /\/$/,

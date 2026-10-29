@@ -2,7 +2,7 @@ import path from "node:path";
 import { readdir } from "node:fs/promises";
 import { randomUUID, createHash } from "node:crypto";
 import { config, ensure } from "./config.js";
-import { atomic, json, projectDir } from "./store.js";
+import { atomic, json, projectDir, validId } from "./store.js";
 import type { DocumentReference } from "./documents.js";
 
 export interface Qa {
@@ -51,6 +51,50 @@ export async function listQa(projectId: string): Promise<Qa[]> {
     throw e;
   }
 }
+// Preserve reviewed history, but never serve an answer from a replaced chapter.
+export async function currentQa(projectId: string) {
+  const all = await listQa(projectId);
+  const guides = new Map<
+    string,
+    Promise<Array<{ id: string; documentId?: string }>>
+  >();
+  for (const q of all)
+    if (
+      q.source &&
+      validId(q.source.guideId) &&
+      !guides.has(q.source.guideId)
+    ) {
+      guides.set(
+        q.source.guideId,
+        json<{ modules: Array<{ id: string; documentId?: string }> }>(
+          path.join(
+            projectDir(projectId),
+            "guides",
+            q.source.guideId + ".json",
+          ),
+        )
+          .then((guide) => guide.modules)
+          .catch((error) => {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+            throw error;
+          }),
+      );
+    }
+  const current = await Promise.all(
+    all.map(
+      async (q) =>
+        !q.source ||
+        (validId(q.source.guideId) &&
+          (await guides.get(q.source.guideId)!).some(
+            (module) =>
+              module.id === q.source!.moduleId &&
+              module.documentId === q.source!.documentId,
+          )),
+    ),
+  );
+  return all.filter((_q, i) => current[i]);
+}
+
 export async function saveQa(
   projectId: string,
   input: {
@@ -164,7 +208,9 @@ export async function matchQa(
   question: string,
   signal?: AbortSignal,
 ) {
-  const all = (await listQa(projectId)).filter((q) => q.status === "verified");
+  const all = (await currentQa(projectId)).filter(
+    (q) => q.status === "verified",
+  );
   const query = normalize(question);
   const exact = all.find((q) =>
     [q.question, ...q.aliases].some((x) => normalize(x) === query),

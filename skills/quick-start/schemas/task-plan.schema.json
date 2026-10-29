@@ -1,11 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": [
-    "title",
-    "audience",
-    "modules"
-  ],
+  "required": ["title", "audience", "modules"],
   "properties": {
     "title": {
       "type": "string",
@@ -33,12 +29,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": [
-          "id",
-          "title",
-          "coverageReason",
-          "scenarios"
-        ],
+        "required": ["id", "title", "coverageReason", "scenarios"],
         "properties": {
           "id": {
             "type": "string",
@@ -111,11 +102,7 @@
                   "type": "array",
                   "items": {
                     "type": "object",
-                    "required": [
-                      "id",
-                      "title",
-                      "checks"
-                    ],
+                    "required": ["id", "title", "checks"],
                     "properties": {
                       "id": {
                         "type": "string",
@@ -150,10 +137,7 @@
                               "anyOf": [
                                 {
                                   "type": "object",
-                                  "required": [
-                                    "role",
-                                    "name"
-                                  ],
+                                  "required": ["role", "name"],
                                   "properties": {
                                     "role": {
                                       "type": "string",
@@ -170,9 +154,7 @@
                                 },
                                 {
                                   "type": "object",
-                                  "required": [
-                                    "text"
-                                  ],
+                                  "required": ["text"],
                                   "properties": {
                                     "text": {
                                       "type": "string",
@@ -184,9 +166,7 @@
                                 },
                                 {
                                   "type": "object",
-                                  "required": [
-                                    "label"
-                                  ],
+                                  "required": ["label"],
                                   "properties": {
                                     "label": {
                                       "type": "string",
@@ -198,9 +178,7 @@
                                 },
                                 {
                                   "type": "object",
-                                  "required": [
-                                    "testId"
-                                  ],
+                                  "required": ["testId"],
                                   "properties": {
                                     "testId": {
                                       "type": "string",
@@ -212,9 +190,7 @@
                                 },
                                 {
                                   "type": "object",
-                                  "required": [
-                                    "css"
-                                  ],
+                                  "required": ["css"],
                                   "properties": {
                                     "css": {
                                       "type": "string",
@@ -230,10 +206,7 @@
                               "anyOf": [
                                 {
                                   "type": "object",
-                                  "required": [
-                                    "role",
-                                    "name"
-                                  ],
+                                  "required": ["role", "name"],
                                   "properties": {
                                     "role": {
                                       "type": "string",
@@ -250,9 +223,7 @@
                                 },
                                 {
                                   "type": "object",
-                                  "required": [
-                                    "text"
-                                  ],
+                                  "required": ["text"],
                                   "properties": {
                                     "text": {
                                       "type": "string",
@@ -264,9 +235,7 @@
                                 },
                                 {
                                   "type": "object",
-                                  "required": [
-                                    "label"
-                                  ],
+                                  "required": ["label"],
                                   "properties": {
                                     "label": {
                                       "type": "string",
@@ -278,9 +247,7 @@
                                 },
                                 {
                                   "type": "object",
-                                  "required": [
-                                    "testId"
-                                  ],
+                                  "required": ["testId"],
                                   "properties": {
                                     "testId": {
                                       "type": "string",
@@ -292,9 +259,7 @@
                                 },
                                 {
                                   "type": "object",
-                                  "required": [
-                                    "css"
-                                  ],
+                                  "required": ["css"],
                                   "properties": {
                                     "css": {
                                       "type": "string",
@@ -375,10 +340,7 @@
                             },
                             "rowKey": {
                               "type": "object",
-                              "required": [
-                                "column",
-                                "value"
-                              ],
+                              "required": ["column", "value"],
                               "properties": {
                                 "column": {
                                   "type": "string",
@@ -397,10 +359,7 @@
                               "type": "array",
                               "items": {
                                 "type": "object",
-                                "required": [
-                                  "column",
-                                  "value"
-                                ],
+                                "required": ["column", "value"],
                                 "properties": {
                                   "column": {
                                     "type": "string",
@@ -427,18 +386,13 @@
                     },
                     "additionalProperties": false
                   },
-                  "maxItems": 6
+                  "maxItems": 24
                 },
                 "preconditions": {
                   "type": "array",
                   "items": {
                     "type": "object",
-                    "required": [
-                      "id",
-                      "description",
-                      "target",
-                      "assertion"
-                    ],
+                    "required": ["id", "description", "target", "assertion"],
                     "properties": {
                       "id": {
                         "type": "string",
@@ -453,10 +407,7 @@
                         "anyOf": [
                           {
                             "type": "object",
-                            "required": [
-                              "role",
-                              "name"
-                            ],
+                            "required": ["role", "name"],
                             "properties": {
                               "role": {
                                 "type": "string",
@@ -473,9 +424,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "text"
-                            ],
+                            "required": ["text"],
                             "properties": {
                               "text": {
                                 "type": "string",
@@ -487,9 +436,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "label"
-                            ],
+                            "required": ["label"],
                             "properties": {
                               "label": {
                                 "type": "string",
@@ -501,9 +448,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "testId"
-                            ],
+                            "required": ["testId"],
                             "properties": {
                               "testId": {
                                 "type": "string",
@@ -515,9 +460,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "css"
-                            ],
+                            "required": ["css"],
                             "properties": {
                               "css": {
                                 "type": "string",
@@ -533,10 +476,7 @@
                         "anyOf": [
                           {
                             "type": "object",
-                            "required": [
-                              "role",
-                              "name"
-                            ],
+                            "required": ["role", "name"],
                             "properties": {
                               "role": {
                                 "type": "string",
@@ -553,9 +493,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "text"
-                            ],
+                            "required": ["text"],
                             "properties": {
                               "text": {
                                 "type": "string",
@@ -567,9 +505,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "label"
-                            ],
+                            "required": ["label"],
                             "properties": {
                               "label": {
                                 "type": "string",
@@ -581,9 +517,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "testId"
-                            ],
+                            "required": ["testId"],
                             "properties": {
                               "testId": {
                                 "type": "string",
@@ -595,9 +529,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "css"
-                            ],
+                            "required": ["css"],
                             "properties": {
                               "css": {
                                 "type": "string",
@@ -678,10 +610,7 @@
                       },
                       "rowKey": {
                         "type": "object",
-                        "required": [
-                          "column",
-                          "value"
-                        ],
+                        "required": ["column", "value"],
                         "properties": {
                           "column": {
                             "type": "string",
@@ -700,10 +629,7 @@
                         "type": "array",
                         "items": {
                           "type": "object",
-                          "required": [
-                            "column",
-                            "value"
-                          ],
+                          "required": ["column", "value"],
                           "properties": {
                             "column": {
                               "type": "string",
@@ -731,12 +657,7 @@
                   "type": "array",
                   "items": {
                     "type": "object",
-                    "required": [
-                      "id",
-                      "description",
-                      "target",
-                      "assertion"
-                    ],
+                    "required": ["id", "description", "target", "assertion"],
                     "properties": {
                       "id": {
                         "type": "string",
@@ -751,10 +672,7 @@
                         "anyOf": [
                           {
                             "type": "object",
-                            "required": [
-                              "role",
-                              "name"
-                            ],
+                            "required": ["role", "name"],
                             "properties": {
                               "role": {
                                 "type": "string",
@@ -771,9 +689,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "text"
-                            ],
+                            "required": ["text"],
                             "properties": {
                               "text": {
                                 "type": "string",
@@ -785,9 +701,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "label"
-                            ],
+                            "required": ["label"],
                             "properties": {
                               "label": {
                                 "type": "string",
@@ -799,9 +713,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "testId"
-                            ],
+                            "required": ["testId"],
                             "properties": {
                               "testId": {
                                 "type": "string",
@@ -813,9 +725,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "css"
-                            ],
+                            "required": ["css"],
                             "properties": {
                               "css": {
                                 "type": "string",
@@ -831,10 +741,7 @@
                         "anyOf": [
                           {
                             "type": "object",
-                            "required": [
-                              "role",
-                              "name"
-                            ],
+                            "required": ["role", "name"],
                             "properties": {
                               "role": {
                                 "type": "string",
@@ -851,9 +758,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "text"
-                            ],
+                            "required": ["text"],
                             "properties": {
                               "text": {
                                 "type": "string",
@@ -865,9 +770,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "label"
-                            ],
+                            "required": ["label"],
                             "properties": {
                               "label": {
                                 "type": "string",
@@ -879,9 +782,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "testId"
-                            ],
+                            "required": ["testId"],
                             "properties": {
                               "testId": {
                                 "type": "string",
@@ -893,9 +794,7 @@
                           },
                           {
                             "type": "object",
-                            "required": [
-                              "css"
-                            ],
+                            "required": ["css"],
                             "properties": {
                               "css": {
                                 "type": "string",
@@ -976,10 +875,7 @@
                       },
                       "rowKey": {
                         "type": "object",
-                        "required": [
-                          "column",
-                          "value"
-                        ],
+                        "required": ["column", "value"],
                         "properties": {
                           "column": {
                             "type": "string",
@@ -998,10 +894,7 @@
                         "type": "array",
                         "items": {
                           "type": "object",
-                          "required": [
-                            "column",
-                            "value"
-                          ],
+                          "required": ["column", "value"],
                           "properties": {
                             "column": {
                               "type": "string",
@@ -1029,7 +922,7 @@
               "additionalProperties": false
             },
             "minItems": 1,
-            "maxItems": 4
+            "maxItems": 16
           }
         },
         "additionalProperties": false

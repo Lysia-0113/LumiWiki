@@ -30,8 +30,9 @@ import {
   wikiTask,
   importGeneratedWiki,
 } from "./deepwiki.js";
-import { listQa, matchQa, publicQa, saveQa } from "./qa.js";
+import { currentQa, listQa, matchQa, publicQa, saveQa } from "./qa.js";
 import { generateGuideQa } from "./quick-start-qa.js";
+import { guideTaskActive } from "./guide-workflow.js";
 
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
 const send = (res: ServerResponse, status: number, value: unknown) => {
@@ -244,7 +245,13 @@ export function createServer() {
           return;
         }
         if (sub === "qa" && method === "GET") {
-          send(res, 200, { items: await listQa(id) });
+          const current = new Set((await currentQa(id)).map((q) => q.id));
+          send(res, 200, {
+            items: (await listQa(id)).map((q) => ({
+              ...q,
+              sourceCurrent: current.has(q.id),
+            })),
+          });
           return;
         }
         if (sub === "qa" && method === "POST") {
@@ -263,7 +270,18 @@ export function createServer() {
           return;
         }
         if (["documents", "guides", "runs"].includes(sub) && method === "GET") {
-          send(res, 200, { items: await records(id, sub) });
+          const items = await records(id, sub);
+          send(res, 200, {
+            items:
+              sub === "runs"
+                ? items.map((item) => ({
+                    ...item,
+                    active:
+                      item.kind === "chapter-guide" &&
+                      guideTaskActive(id, String(item.id)),
+                  }))
+                : items,
+          });
           return;
         }
         const file = sub.match(
@@ -401,7 +419,7 @@ export function createServer() {
         if (route === "/api/v1/public/config") {
           send(res, 200, {
             name: project.name,
-            recommendedQuestions: (await listQa(active))
+            recommendedQuestions: (await currentQa(active))
               .filter((q) => q.status === "verified")
               .slice(0, 6)
               .map((q) => q.question),
@@ -410,7 +428,7 @@ export function createServer() {
         }
         if (route === "/api/v1/public/qa" && method === "GET") {
           send(res, 200, {
-            items: (await listQa(active))
+            items: (await currentQa(active))
               .filter((q) => q.status === "verified")
               .map(publicQa),
           });

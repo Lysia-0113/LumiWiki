@@ -100,7 +100,7 @@ export const planSchema = Type.Object(
                       },
                       { additionalProperties: false },
                     ),
-                    { maxItems: 6 },
+                    { maxItems: 24 },
                   ),
                 ),
                 preconditions: Type.Array(checkSchema, {
@@ -114,7 +114,7 @@ export const planSchema = Type.Object(
               },
               { additionalProperties: false },
             ),
-            { minItems: 1, maxItems: 4 },
+            { minItems: 1, maxItems: 16 },
           ),
         },
         { additionalProperties: false },
@@ -934,9 +934,15 @@ export class QuickStartRun {
     if (tool === "document_write")
       this.assertDocument(
         input.moduleId as string | undefined,
-        ((input.steps || []) as Array<{ imageId?: string }>).flatMap((s) =>
-          s.imageId ? [s.imageId] : [],
-        ),
+        (
+          (input.steps || []) as Array<{
+            imageId?: string;
+            images?: Array<{ imageId: string }>;
+          }>
+        ).flatMap((s) => [
+          ...(s.imageId ? [s.imageId] : []),
+          ...(s.images || []).map((image) => image.imageId),
+        ]),
       );
     if (tool === "quick_start_publish")
       this.assertPublish(
@@ -967,6 +973,8 @@ export function quickStartHooks(
   save: () => Promise<void>,
   emit: (event: Record<string, unknown>) => void,
   canContinue: () => boolean = () => true,
+  isComplete: () => boolean = () => run.published,
+  chapterMode = false,
 ): ExtensionFactory {
   return (pi) => {
     pi.on("before_agent_start", () =>
@@ -1010,7 +1018,7 @@ export function quickStartHooks(
         run.scenarios.every((s) => s.status === "blocked");
       if (
         event.outcome === "completed" &&
-        !run.published &&
+        !isComplete() &&
         !allBlocked &&
         run.continuations < 2 &&
         canContinue()
@@ -1024,7 +1032,9 @@ export function quickStartHooks(
               type: "custom_message" as const,
               customType: "quick-start-resume",
               display: false,
-              content: `任务还没有生成指南，不能在此结束。继续当前用户已授权任务：先根据quick_start_status确认状态，再执行下一步；尚未规划时先用quick_start_plan锁定契约。检查点验证后截图再继续，最后核验业务结果、保存文档和汇总。遇到真实阻碍用block记录，不编造通过。当前剩余续跑次数${2 - run.continuations}。`,
+              content: chapterMode
+                ? `当前章节尚未保存。继续已授权的本章任务：读取quick_start_status，未规划时先定义本章契约，逐项核验和截图后用document_write保存完整章节；整本指南由宿主组装，不调用发布工具。遇到真实阻碍用guide_chapter_block记录，不能编造通过。剩余续跑次数${2 - run.continuations}。`
+                : `任务还没有生成指南，不能在此结束。继续当前用户已授权任务：先根据quick_start_status确认状态，再执行下一步；尚未规划时先用quick_start_plan锁定契约。检查点验证后截图再继续，最后核验业务结果、保存文档和汇总。遇到真实阻碍用block记录，不编造通过。当前剩余续跑次数${2 - run.continuations}。`,
             },
           ],
         };

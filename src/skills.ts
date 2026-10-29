@@ -33,7 +33,10 @@ export function projectSkills(publicMode = false) {
     result.skills.some((s) => s.name === "quick-start"),
     "缺少 quick-start Skill",
   );
-  return result;
+  return {
+    ...result,
+    skills: result.skills.filter((s) => s.name === "quick-start"),
+  };
 }
 
 export function runPrompt(question: string, mode?: string) {

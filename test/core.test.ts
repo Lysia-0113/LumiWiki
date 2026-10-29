@@ -94,11 +94,8 @@ test("草稿不参与直答，已审核问答支持规范化精确匹配", async
   assert.equal(cosine([1, 0], [0, 1]), 0);
   assert.throws(() => cosine([1], [1, 2]));
 });
-test("实际 Pi SDK 完成工具调用循环与 SSE 文本事件（本地协议桩，无付费模型）", async () => {
-  const repo = path.join(tmp, "sdk-repo");
-  await mkdir(repo);
-  await writeFile(path.join(repo, "main.go"), "package main\n");
-  const p = await createProject({ name: "sdk", path: repo });
+test("实际 Pi SDK 聊天工具循环与 SSE，不注册指南、画框或文件工具", async () => {
+  const p = await createProject({ name: "sdk" });
   const file = await importWiki(
     p,
     "sdk.md",
@@ -110,135 +107,85 @@ test("实际 Pi SDK 完成工具调用循环与 SSE 文本事件（本地协议�
     for await (const chunk of req) body += chunk;
     const input = JSON.parse(body);
     calls++;
-    res.writeHead(200, { "Content-Type": "text/event-stream" });
-    const choice =
-      calls === 1
-        ? {
-            delta: {
-              role: "assistant",
-              tool_calls: [
-                {
-                  index: 0,
-                  id: "call_invalid_document",
-                  type: "function",
-                  function: {
-                    name: "document_write",
-                    arguments: JSON.stringify({
-                      title: "跳过检查",
-                      summary: "不能保存",
-                      steps: [
-                        {
-                          title: "伪完成",
-                          instruction: "没有验证",
-                          expectedResult: "成功",
-                        },
-                      ],
-                      references: [
-                        { kind: "page", location: "http://fixture.invalid" },
-                      ],
-                    }),
-                  },
-                },
-              ],
-            },
-            finish_reason: "tool_calls",
-          }
-        : calls === 2
-          ? {
-              delta: {
-                role: "assistant",
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: "call_read",
-                    type: "function",
-                    function: {
-                      name: "wiki_read",
-                      arguments: JSON.stringify({ pageId: file.pages[0].id }),
-                    },
-                  },
-                ],
-              },
-              finish_reason: "tool_calls",
-            }
-          : {
-              delta: { role: "assistant", content: "已读取知识库。" },
-              finish_reason: "stop",
-            };
-    assert.ok(input.messages);
-    assert.equal(input.max_tokens ?? input.max_completion_tokens, config.quickStartMaxTokens);
-    if (calls === 2)
-      assert.ok(
-        JSON.stringify(input.messages).includes(
-          "快速上手文档必须绑定 moduleId",
-        ),
-      );
+    const names = input.tools.map((t: any) => t.function.name);
     assert.ok(
-      JSON.stringify(input.messages).includes("References are relative to"),
-    );
-    assert.ok(
-      !JSON.stringify(input.messages).includes("./lumiwiki test"),
-      "开发者验收文档不得注入技能上下文",
-    );
-    assert.ok(
-      !input.tools.some((t: { function: { name: string } }) =>
-        ["read", "ls", "grep", "find", "bash"].includes(t.function.name),
+      !names.some((name: string) =>
+        [
+          "read",
+          "ls",
+          "grep",
+          "find",
+          "bash",
+          "document_write",
+          "image_annotate",
+          "quick_start_plan",
+          "qa_write",
+        ].includes(name),
       ),
     );
-    res.write(
-      "data: " +
-        JSON.stringify({
-          id: "test",
-          object: "chat.completion.chunk",
-          created: 1,
-          model: "fixture",
-          choices: [{ index: 0, ...choice }],
-        }) +
-        "\n\n",
+    assert.equal(
+      input.max_tokens ?? input.max_completion_tokens,
+      Number(process.env.LLM_MAX_TOKENS || 4096),
     );
-    res.end("data: [DONE]\n\n");
+    assert.ok(
+      !JSON.stringify(input.messages).includes("References are relative to"),
+      "在线问答不加载任何生成技能",
+    );
+    const delta =
+      calls === 1
+        ? {
+            role: "assistant",
+            tool_calls: [
+              {
+                index: 0,
+                id: "call_read",
+                type: "function",
+                function: {
+                  name: "wiki_read",
+                  arguments: JSON.stringify({ pageId: file.pages[0].id }),
+                },
+              },
+            ],
+          }
+        : { role: "assistant", content: "已读取知识库。" };
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.end(
+      `data: ${JSON.stringify({ id: "test", object: "chat.completion.chunk", created: 1, model: "fixture", choices: [{ index: 0, delta, finish_reason: calls === 1 ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`,
+    );
   });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  const address = server.address() as { port: number };
-  Object.assign(config.llm, {
-    baseUrl: `http://127.0.0.1:${address.port}/v1`,
-    key: "fixture-key",
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  config.llm = {
+    baseUrl: `http://127.0.0.1:${(server.address() as any).port}/v1`,
+    key: "fixture",
     model: "fixture",
-  });
-  const events: Array<Record<string, unknown>> = [];
+  };
+  const events: any[] = [];
   try {
     await ask(
       p,
-      { question: "读取知识库", mode: "quick_start" },
-      (e) => events.push(e),
+      { question: "读取知识库", mode: "chat" },
+      (event) => events.push(event),
       AbortSignal.timeout(20000),
     );
-    assert.equal(calls, 5, "未汇总任务最多由Pi收尾hook续跑两次");
-    assert.ok(events.some((e) => e.type === "tool" && e.name === "wiki_read"));
-    assert.ok(events.some((e) => e.type === "text"));
-    assert.ok(events.some((e) => e.type === "done"));
-    const done = events.find((e) => e.type === "done")!.result as {
-      runId: string;
-    };
+    assert.equal(calls, 2);
+    assert.ok(
+      events.some(
+        (event) => event.type === "tool" && event.name === "wiki_read",
+      ),
+    );
+    assert.ok(events.some((event) => event.type === "text"));
+    const done = events.find((event) => event.type === "done").result;
     const saved = JSON.parse(
       await readFile(
         path.join(projectDir(p.key), "runs", done.runId + ".json"),
         "utf8",
       ),
     );
-    assert.equal(
-      saved.toolCalls,
-      1,
-      "Pi hook must block document_write before its handler consumes budget",
-    );
-    assert.ok(events.some((e) => e.type === "workflow"));
-    assert.equal(saved.workflow.continuations, 2);
-    assert.ok(
-      events.some((e) => e.type === "skill" && e.name === "quick-start"),
-    );
+    assert.equal(saved.toolCalls, 1);
+    assert.equal(saved.workflow, undefined);
   } finally {
     server.closeAllConnections();
-    await new Promise<void>((r) => server.close(() => r()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
 test("中相似度 Judge 只能选择已提供的候选，不能把第二条答案错配成第一条", async () => {

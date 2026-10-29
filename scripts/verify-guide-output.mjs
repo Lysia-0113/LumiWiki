@@ -27,10 +27,18 @@ const guide = (await api(`/api/projects/${projectId}/guides`)).items.find(
   (g) => g.id === guideId,
 );
 assert.equal(guide.qaGeneration.status, "completed");
-const qas = (await api(`/api/projects/${projectId}/qa`)).items.filter(
-  (q) => q.source?.guideId === guideId,
+const projectQas = (await api(`/api/projects/${projectId}/qa`)).items;
+const qas = projectQas.filter(
+  (q) =>
+    q.source?.guideId === guideId &&
+    q.sourceCurrent !== false &&
+    guide.modules.some(
+      (module) =>
+        module.id === q.source.moduleId &&
+        module.documentId === q.source.documentId,
+    ),
 );
-assert.ok(qas.length > 0 && qas.length <= 20);
+assert.ok(qas.length > 0);
 for (const m of guide.modules.filter((m) => m.documentId)) {
   const doc = await json(path.join(root, "documents", m.documentId + ".json"));
   const matches = qas.filter((q) => q.source.moduleId === m.id);
@@ -49,7 +57,8 @@ for (const m of guide.modules.filter((m) => m.documentId)) {
       ),
     ),
   );
-  for (const state of guide.verification.scenarios.filter(
+  const verification = doc.verification || guide.verification;
+  for (const state of verification.scenarios.filter(
     (s) => s.moduleId === m.id && s.status === "verified",
   )) {
     for (const proof of [...state.checkpoints, ...state.outcomes]) {
@@ -60,7 +69,13 @@ for (const m of guide.modules.filter((m) => m.documentId)) {
         await stat(path.join(root, "artifacts", id + ".png"));
     }
   }
-  assert.ok(doc.steps.length <= 8);
+  assert.ok(doc.steps.length > 0);
+  if (doc.coverage)
+    assert.ok(
+      doc.coverage.every((item) =>
+        ["covered", "limited"].includes(item.status),
+      ),
+    );
 }
 for (const q of qas)
   assert.equal(
@@ -77,9 +92,9 @@ const html = await readFile(
   path.join(root, "guides", guideId + ".html"),
   "utf8",
 );
-assert.ok(!/预期结果：|验证范围：|任务契约待复核|<h2>依据/.test(html));
-const htmlFile = path.join(out, "concise-guide.html"),
-  qaFile = path.join(out, "concise-guide-qa.html");
+assert.ok(!/验证范围：|任务契约待复核|<h2>依据/.test(html));
+const htmlFile = path.join(out, "complete-guide.html"),
+  qaFile = path.join(out, "complete-guide-qa.html");
 await atomic(htmlFile, html, true);
 await atomic(
   qaFile,
@@ -103,7 +118,7 @@ try {
       ),
   );
   await page.screenshot({
-    path: path.join(out, "concise-guide-preview.png"),
+    path: path.join(out, "complete-guide-preview.png"),
     fullPage: true,
   });
   const projects = await api("/api/projects");
@@ -134,12 +149,12 @@ try {
     .locator("#qa-list .item")
     .filter({ hasText: qas[0].question })
     .waitFor();
-  assert.equal(await page.locator("#qa-list .item").count(), qas.length);
+  assert.equal(await page.locator("#qa-list .item").count(), projectQas.length);
   assert.equal(
     await page
       .getByRole("button", { name: "确认可用于直答", exact: true })
       .count(),
-    qas.length,
+    projectQas.filter((q) => q.status !== "verified").length,
   );
   await page.screenshot({
     path: path.join(out, "qa-review-preview.png"),
@@ -165,7 +180,7 @@ try {
       "admin guide and QA panels",
     ],
   };
-  await atomic(path.join(out, "concise-guide-qa.json"), report);
+  await atomic(path.join(out, "complete-guide-qa.json"), report);
   console.log(JSON.stringify(report));
 } finally {
   if (originalProject && originalProject !== projectId)

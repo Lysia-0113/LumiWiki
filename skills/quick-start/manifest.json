@@ -1,9 +1,13 @@
 {
   "name": "quick-start",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "runtime": "Pi SDK 1.4.0",
   "entry": "SKILL.md",
   "contract": "schemas/task-plan.schema.json",
+  "outlineContract": "schemas/guide-outline.schema.json",
+  "workflow": "../../src/guide-workflow.ts",
+  "phases": ["planner", "chapter"],
+  "initialQaSkill": "../initial-qa/SKILL.md",
   "host": {
     "module": "../../src/quick-start.ts",
     "registration": "src/agent.ts explicitly registers quickStartHooks; this manifest is descriptive, not a Pi extension loader"

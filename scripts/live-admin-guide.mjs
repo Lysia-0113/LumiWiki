@@ -54,7 +54,7 @@ try {
       browserId: connection.id,
       mode: "quick_start",
       question:
-        "请为采购审核员生成一份复杂后台操作指南，完成真实任务：从三级菜单进入采购单，确认第一页未显示目标时不能宣称不存在，再筛选定位PO-012（李四、320元），通过该行审批抽屉填写结果“通过”、意见“验收通过”，经过确认完成审批。随后刷新页面、重新进入列表筛选同一单号，核对已通过及操作人，再到审批日志核对只有本次记录。不要审批其他单据。这是已授权的独立测试服务。\n读取workflow与admin技能资料，规划profile=admin的一模块成功场景，至少两个中间检查点（唯一记录已定位、表单已正确填写），分别核验并截图后再继续。业务结果需最终验证，不用toast代替；关键截图用image_annotate画编号框。所有检查点与结果截图留在证据归档。document_write绑定模块，展示3至6步短说明和2至4张关键图，保留doc与page依据，最后quick_start_publish；宿主随后自动整理QA草稿。文案简短自然，不写验收过程，单号和意见仅作示例；不要输出ref或文件路径。完成后保留数据供宿主验收，不要撤销审批。",
+        "请为采购审核员生成一份复杂后台操作指南，完成真实任务：从三级菜单进入采购单，确认第一页未显示目标时不能宣称不存在，再筛选定位PO-012（李四、320元），通过该行审批抽屉填写结果“通过”、意见“验收通过”，经过确认完成审批。随后刷新页面、重新进入列表筛选同一单号，核对已通过及操作人，再到审批日志核对只有本次记录。不要审批其他单据。这是已授权的独立测试服务。\n读取workflow与admin技能资料，规划profile=admin的一模块成功场景，至少两个中间检查点（唯一记录已定位、表单已正确填写），分别核验并截图后再继续。业务结果需最终验证，不用toast代替；关键截图用image_annotate画编号框。所有检查点与结果截图留在证据归档。全局只读探索先用guide_outline确定一个章节及其questions；独立章节会话用document_write绑定该章节，完整解释角色、准备、字段、操作与结果，用coverage逐项回答问题，保留doc与page依据；正文不限制步数和长度，图片按解释需要选择。框只标需要解释的区域，避免重叠，长解释放description由宿主生成图下注解。宿主组装后由独立initial-qa Skill整理QA草稿，不调用模型发布工具。文案自然完整，不写内部验收过程，单号和意见仅作示例；不要输出ref或文件路径。完成后保留数据供宿主验收，不要撤销审批。",
     },
     (event) => {
       events.push(event);
@@ -65,10 +65,21 @@ try {
   );
   const guide = events.find((e) => e.type === "guide")?.guide;
   assert.ok(guide, "must persist a guide");
-  assert.equal(guide.verification.plan.profile, "admin");
-  assert.ok(guide.verification.scenarios.every((s) => s.status === "verified"));
+  assert.equal(guide.complete, true, "all planned chapters must be complete");
+  const verification = JSON.parse(
+    await readFile(
+      path.join(
+        projectDir(project.key),
+        "documents",
+        guide.modules.find((module) => module.documentId).documentId + ".json",
+      ),
+      "utf8",
+    ),
+  ).verification;
+  assert.equal(verification.plan.profile, "admin");
+  assert.ok(verification.scenarios.every((s) => s.status === "verified"));
   assert.ok(
-    guide.verification.scenarios.every(
+    verification.scenarios.every(
       (s) =>
         s.checkpoints.length >= 2 &&
         s.checkpoints.every(
@@ -77,8 +88,8 @@ try {
     ),
   );
   assert.equal(app.events.length, 1, "exactly one approval");
-  for (const state of guide.verification.scenarios) {
-    const spec = guide.verification.plan.modules
+  for (const state of verification.scenarios) {
+    const spec = verification.plan.modules
       .find((m) => m.id === state.moduleId)
       .scenarios.find((s) => s.id === state.scenarioId);
     assert.deepEqual(
@@ -97,7 +108,7 @@ try {
   );
   report.readback = readback;
   assert.ok(
-    guide.verification.scenarios.every(
+    verification.scenarios.every(
       (s) =>
         s.outcomes.length &&
         s.outcomes.every(
@@ -135,10 +146,13 @@ try {
       doc.references.some((r) => r.kind === "page"),
   );
   const images = new Set(
-    doc.steps.flatMap((s) => (s.imageId ? [s.imageId] : [])),
+    doc.steps.flatMap((s) => [
+      ...(s.imageId ? [s.imageId] : []),
+      ...(s.images || []).map((image) => image.imageId),
+    ]),
   );
   assert.ok(
-    images.size >= 1 && images.size <= 6,
+    images.size >= 1,
     "guide selects key screenshots while complete evidence stays archived",
   );
   const htmlFile = path.join(
@@ -177,7 +191,7 @@ try {
     htmlFile,
     projectId: project.key,
     tools: toolNames,
-    checkpoints: guide.verification.scenarios.map((s) => ({
+    checkpoints: verification.scenarios.map((s) => ({
       id: s.scenarioId,
       checkpoints: s.checkpoints.map((c) => c.id),
     })),
@@ -200,6 +214,7 @@ try {
       .filter((e) => e.type === "tool")
       .map((e) => ({ name: e.name, status: e.status })),
     workflow: events.filter((e) => e.type === "workflow").at(-1)?.workflow,
+    guideTask: events.filter((e) => e.type === "guide_workflow").at(-1)?.task,
   });
   console.log(JSON.stringify({ status: "failed", error: report.error }));
   process.exitCode = 1;

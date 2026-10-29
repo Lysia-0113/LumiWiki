@@ -103,7 +103,7 @@ try {
     project,
     {
       question:
-        "为普通用户生成一份快速上手指南，恰好2个模块：查看羽毛球预约日历，以及查看钱包余额与流水。独立测试浏览器已经人工登录。先读取技能workflow资料和最相关的1至2页Wiki。先用browser_navigate分别进入两个模块页面，确认实际结果区域、余额和记录的可见内容，再锁定任务契约；不要把未观察到的Wiki术语设为必需文本。显式使用profile=general，每个模块选一个只读success场景，coverageReason说明本次仅做查询，不覆盖预约和余额错误分支。定义当前界面可验证的前置和结果条件。锁定计划后才能处理公告和导航；按prepare、begin、操作、verify、截图顺序执行，每个模块把验证后截图用image_annotate画编号框并在文案说明编号，document_write绑定moduleId并包含doc与page依据。最后quick_start_publish汇总。只做查询，不提交预约、充值、退款或取消。不要输出账号密码。",
+        "为普通用户生成一份快速上手指南，恰好2个模块：查看羽毛球预约日历，以及查看钱包余额与流水。独立测试浏览器已经人工登录。先读取技能workflow资料和最相关的1至2页Wiki。先用browser_navigate分别进入两个模块页面，确认实际结果区域、余额和记录的可见内容，再锁定任务契约；不要把未观察到的Wiki术语设为必需文本。显式使用profile=general，每个模块选一个只读success场景，coverageReason说明本次仅做查询，不覆盖预约和余额错误分支。定义当前界面可验证的前置和结果条件。锁定计划后才能处理公告和导航；按prepare、begin、操作、verify、截图顺序执行，每个模块把验证后截图用image_annotate画编号框并在文案说明编号，document_write绑定moduleId并包含doc与page依据。先由全局只读探索会话用guide_outline确定这两个章节及完整questions清单，再分别由独立章节会话核验并用document_write提交完整操作说明和coverage；整本由宿主组装，不调用发布工具，不限制正文长度或图片数量。编号的详细解释放image_annotate.description，由宿主自动放在图下。只做查询，不提交预约、充值、退款或取消。不要输出账号密码。",
       browserId: guideBrowser.id,
       mode: "quick_start",
     },
@@ -116,8 +116,13 @@ try {
   );
   const guide = guideEvents.find((e) => e.type === "guide")?.guide;
   assert.ok(guide, "必须实际保存指南");
-  assert.equal(guide.verification.verificationLevel, "ui-checks");
-  assert.ok(guide.verification.scenarios.every((s) => s.status === "verified"));
+  assert.equal(guide.complete, true);
+  assert.equal(guide.verification.level, "ui-checks");
+  assert.ok(
+    guide.verification.chapters.every(
+      (chapter) => chapter.status === "generated",
+    ),
+  );
   assert.ok(
     guideEvents.some(
       (e) =>
@@ -138,9 +143,15 @@ try {
       ),
     );
     assert.ok(
-      doc.steps.some((s) => s.imageId),
+      doc.steps.some((s) => s.imageId || s.images?.length),
       "每模块必须有真实截图",
     );
+    assert.ok(
+      doc.verification.scenarios.every(
+        (scenario) => scenario.status === "verified",
+      ),
+    );
+    assert.ok(doc.coverage.every((item) => item.status === "covered"));
     assert.ok(doc.references.some((r) => r.kind === "doc"));
     assert.ok(doc.references.some((r) => r.kind === "page"));
     assert.ok(!doc.references.some((r) => r.kind === "code"));

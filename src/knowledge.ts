@@ -224,10 +224,10 @@ export async function readPage(
     sources: page.sources,
   };
 }
-export async function wikiContext(projectId: string) {
+export async function wikiContext(projectId: string, catalogOnly = false) {
   const files = await listWiki(projectId);
   const total = files.reduce((n, f) => n + f.totalChars, 0);
-  const full = total <= config.wikiLimit;
+  const full = !catalogOnly && total <= config.wikiLimit;
   const pages = files.flatMap((f) => f.pages);
   const content = full
     ? (

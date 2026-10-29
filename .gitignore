@@ -30,7 +30,7 @@ go.work.sum
 .env.*
 !.env.example
 .DS_Store
-node_modules/
+node_modules
 .idea/
 .lumiwiki/
 .webdemo/

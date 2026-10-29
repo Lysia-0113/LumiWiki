@@ -10,6 +10,18 @@ const state = {
   view: "overview",
   taskTimer: null,
 };
+const guideStatus = (status) =>
+  ({
+    planning: "规划目录中",
+    running: "执行中",
+    completed: "完整生成",
+    partial: "部分完成",
+    failed: "未完成",
+    cancelled: "已停止",
+    pending: "待执行",
+    generated: "已保存",
+    blocked: "受阻",
+  })[status] || status;
 const notice = (message, error = false) => {
   $("#notice").textContent = message;
   $("#notice").classList.toggle("error", error);
@@ -231,6 +243,40 @@ async function loadView() {
         $("#outputs").append(item);
       }
     }
+    const tasks = await api(base + "/runs");
+    for (const task of tasks.items.filter(
+      (item) => item.kind === "chapter-guide",
+    )) {
+      const item = node("div", undefined, "item");
+      item.append(
+        node("strong", `章节任务 · ${task.outline?.title || task.question}`),
+      );
+      const counts = task.chapters.reduce(
+        (result, chapter) => ({
+          ...result,
+          [chapter.status]: (result[chapter.status] || 0) + 1,
+        }),
+        {},
+      );
+      item.append(
+        node(
+          "p",
+          `${guideStatus(task.status)} · ${task.outline ? `已保存 ${counts.generated || 0}/${task.chapters.length} 章` : "目录尚未确定"}${task.error ? ` · ${task.error}` : ""}`,
+        ),
+      );
+      for (const chapter of task.chapters)
+        item.append(
+          node(
+            "small",
+            `${chapter.spec.title} · ${chapter.coverageComplete === false && chapter.status === "generated" ? "已保存，覆盖受限" : guideStatus(chapter.status)}${chapter.reason ? `：${chapter.reason}` : chapter.coverageComplete === false ? `：${chapter.limitations.join("；")}` : ""}`,
+          ),
+        );
+      if (!task.active && task.status !== "completed")
+        item.append(
+          button("继续 / 重试未完成章节", () => resumeGuideTask(task)),
+        );
+      $("#outputs").append(item);
+    }
     if (!$("#outputs").children.length)
       $("#outputs").append(
         node("p", "助手生成的文档与指南将保存在这里。", "empty"),
@@ -246,7 +292,15 @@ async function loadView() {
         node("p", q.answer),
         node("span", q.status === "verified" ? "已审核" : "草稿", "badge"),
       );
-      if (q.source) item.append(node("small", "来自快速上手指南"));
+      if (q.source)
+        item.append(
+          node(
+            "small",
+            q.sourceCurrent === false
+              ? "来自旧版章节，保留历史，不用于用户直答。"
+              : "来自当前快速上手指南",
+          ),
+        );
       item.append(
         button(
           q.status === "verified" ? "退回草稿" : "确认可用于直答",
@@ -271,6 +325,52 @@ async function loadView() {
       );
   }
 }
+async function resumeGuideTask(task) {
+  if (state.controller)
+    return notice("已有任务正在运行，请先等待或停止。", true);
+  if (!state.browser)
+    return notice("请先在助手中连接并登录测试浏览器，再继续任务。", true);
+  if (
+    !confirm(
+      "继续未完成或受限章节，并重新核对依赖数据。之前的业务操作可能已经生效，请先确认测试环境和授权。",
+    )
+  )
+    return;
+  try {
+    await setView("agent");
+    $("#ask-button").disabled = true;
+    $("#stop").hidden = false;
+    const result = await stream(
+      "/api/ask",
+      {
+        projectKey: state.project.key,
+        question: task.question,
+        browserId: state.browser,
+        mode: "quick_start",
+        taskId: task.id,
+      },
+      $("#messages"),
+    );
+    notice(
+      result?.complete
+        ? "完整指南已生成，待人工复核。"
+        : "已保存本次进度，仍有未完成或受限章节。",
+      !result?.complete,
+    );
+  } catch (error) {
+    notice(
+      error.name === "AbortError"
+        ? "已停止，已保存的章节保留。"
+        : error.message,
+      true,
+    );
+  } finally {
+    $("#ask-button").disabled = false;
+    $("#stop").hidden = true;
+    state.controller = null;
+  }
+}
+
 async function stream(route, data, target, isPublic = false) {
   const controller = new AbortController();
   state.controller = controller;
@@ -293,6 +393,7 @@ async function stream(route, data, target, isPublic = false) {
     decoder = new TextDecoder();
   let buffer = "";
   let failed = false;
+  let result;
   while (true) {
     const { done, value } = await reader.read();
     buffer += decoder.decode(value, { stream: !done });
@@ -303,7 +404,32 @@ async function stream(route, data, target, isPublic = false) {
       for (const line of frame.split("\n"))
         if (line.startsWith("data: ")) {
           const e = JSON.parse(line.slice(6));
-          if (e.type === "session" && !isPublic) state.session = e.sessionId;
+          if (e.type === "session" && !isPublic && e.sessionId)
+            state.session = e.sessionId;
+          if (e.type === "agent_phase" && e.status === "running")
+            target.insertBefore(
+              node(
+                "div",
+                e.phase === "planner"
+                  ? "正在全局只读探索并规划目录……"
+                  : `独立章节会话：${e.title || e.chapterId}`,
+                "event",
+              ),
+              answer,
+            );
+          if (e.type === "guide_workflow") {
+            const completed = e.task.chapters.filter(
+              (chapter) => chapter.status === "generated",
+            ).length;
+            target.insertBefore(
+              node(
+                "div",
+                `指南任务 · ${guideStatus(e.task.status)} · ${e.task.outline ? `已保存 ${completed}/${e.task.chapters.length} 章` : "目录尚未确定"}`,
+                "event",
+              ),
+              answer,
+            );
+          }
           if (e.type === "skill")
             target.insertBefore(
               node("div", `使用 Skill：${e.name}`, "event"),
@@ -337,8 +463,10 @@ async function stream(route, data, target, isPublic = false) {
               ),
               answer,
             );
-          if (e.type === "done" && !answer.textContent)
-            answer.textContent = e.result.answer;
+          if (e.type === "done") {
+            result = e.result;
+            if (!answer.textContent) answer.textContent = e.result.answer;
+          }
           if (e.type === "document" || e.type === "guide")
             target.insertBefore(
               node(
@@ -358,6 +486,9 @@ async function stream(route, data, target, isPublic = false) {
     if (done) break;
   }
   if (failed) throw Error("生成未完成，请检查提示。");
+  if (data.mode === "quick_start" && !result)
+    throw Error("连接已结束，但指南尚未确认完成。可在生成产物查看任务并继续。");
+  return result;
 }
 $("#auth-form").onsubmit = async (e) => {
   e.preventDefault();
@@ -481,7 +612,7 @@ $("#ask-form").onsubmit = async (e) => {
     $("#messages").append(node("div", q, "message"));
     $("#ask-button").disabled = true;
     $("#stop").hidden = false;
-    await stream(
+    const result = await stream(
       "/api/ask",
       {
         question: q,
@@ -493,7 +624,14 @@ $("#ask-form").onsubmit = async (e) => {
       $("#messages"),
     );
     $("#question").value = "";
-    notice("本轮已完成。");
+    notice(
+      result?.taskId
+        ? result.complete
+          ? "完整指南已生成，待人工复核。"
+          : "指南尚未完整生成；已保存进度，可到生成产物继续任务。"
+        : "本轮回答已完成。",
+      Boolean(result?.taskId && !result.complete),
+    );
   } catch (e) {
     notice(
       e.name === "AbortError" ? "运行已停止。" : e.message,
