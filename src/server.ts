@@ -47,6 +47,15 @@ import {
 } from "./qa.js";
 import { admitQa } from "./qa-admission.js";
 import type { QaAnswerResult } from "./qa-result.js";
+import {
+  listPublications,
+  publicationInfo,
+  publishGuide,
+  withdrawGuide,
+  publicGuides,
+  publicGuide,
+  publicGuideImage,
+} from "./publications.js";
 import { generateGuideQa } from "./quick-start-qa.js";
 import { guideTaskActive } from "./guide-workflow.js";
 
@@ -295,6 +304,26 @@ export function createServer() {
           send(res, 200, { ok: true });
           return;
         }
+        if (sub === "publications" && method === "GET") {
+          send(res, 200, {
+            items: (await listPublications(id)).map(publicationInfo),
+          });
+          return;
+        }
+        if (sub === "publications" && method === "POST") {
+          const data = await body(req);
+          send(
+            res,
+            200,
+            await publishGuide(id, data.kind, data.id, data.reviewed),
+          );
+          return;
+        }
+        const publicationId = sub.match(/^publications\/([a-f0-9-]{36})$/);
+        if (publicationId && method === "DELETE") {
+          send(res, 200, await withdrawGuide(id, publicationId[1]));
+          return;
+        }
         const guideQa = sub.match(/^guides\/([a-f0-9-]{36})\/qa$/);
         if (guideQa && method === "POST") {
           const job = await generateGuideQa(id, guideQa[1], abort.signal);
@@ -454,11 +483,21 @@ export function createServer() {
         return;
       }
       if (isPublic) {
-        const active = await activeProject();
+        const input = method === "POST" ? await body(req) : null;
+        const active =
+          u.searchParams.get("project") ||
+          input?.projectKey ||
+          (await activeProject());
         ensure(active, "尚未选择项目", 503);
+        ensure(
+          typeof active === "string" && validId(active),
+          "项目不存在",
+          404,
+        );
         const project = await getProject(active);
         if (route === "/api/v1/public/config") {
           send(res, 200, {
+            projectKey: project.key,
             name: project.name,
             recommendedQuestions: (await currentQa(active))
               .filter((q) => q.enabled)
@@ -472,6 +511,29 @@ export function createServer() {
           });
           return;
         }
+        if (route === "/api/v1/public/guides" && method === "GET") {
+          send(res, 200, { items: await publicGuides(active) });
+          return;
+        }
+        const published = route.match(
+          /^\/api\/v1\/public\/guides\/([a-f0-9-]{36})(?:\/images\/([a-f0-9-]{36}))?$/,
+        );
+        if (published && method === "GET") {
+          if (published[2]) {
+            const version = u.searchParams.has("version")
+              ? Number(u.searchParams.get("version"))
+              : undefined;
+            const image = await publicGuideImage(
+              active,
+              published[1],
+              published[2],
+              version,
+            );
+            res.setHeader("Content-Type", "image/png");
+            res.end(image);
+          } else send(res, 200, await publicGuide(active, published[1]));
+          return;
+        }
         if (route === "/api/v1/public/qa" && method === "GET") {
           send(res, 200, {
             items: (await currentQa(active))
@@ -481,7 +543,7 @@ export function createServer() {
           return;
         }
         if (route === "/api/v1/public/ask" && method === "POST") {
-          const data = await body(req);
+          const data = input!;
           ensure(
             typeof data.question === "string" &&
               data.question.trim() &&
