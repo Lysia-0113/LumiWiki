@@ -346,7 +346,7 @@ test("只接受一个目标网页；改网址会换会话，关闭探索和已�
   assert.equal(visits.length, before);
 });
 
-test.skip("管理台可编辑当前项目配置，密码留空保留，切换项目显示各自设置", async () => {
+test("管理台可编辑当前项目配置，密码留空保留，切换项目显示各自设置", async () => {
   const a = await api("/api/projects", {
     name: "界面 A",
     url: webUrl + "/ui-a/",

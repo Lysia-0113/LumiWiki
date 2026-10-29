@@ -11,7 +11,12 @@ import { config } from "../src/config.js";
 import { atomic, createProject, projectDir } from "../src/store.js";
 import { createServer } from "../src/server.js";
 import { saveQa, listQa } from "../src/qa.js";
-import { publishGuide, listPublications } from "../src/publications.js";
+import {
+  publishGuide,
+  listPublications,
+  publicGuide,
+  publicGuideImage,
+} from "../src/publications.js";
 
 const tmp = await mkdtemp(path.join(os.tmpdir(), "lumiwiki-publications-"));
 config.data = tmp;
@@ -452,7 +457,79 @@ test("用户链接绑定项目，切换管理台不改变指南和 QA；不能�
   assert.equal(pub.data.items[0].answer, "项目 A 的答案");
 });
 
-test.skip("页面贯通审核发布、图文阅读、撤回和重新发布，用户 QA 仍为文字", async () => {
+test("完整章节的多图、预期结果与依据进入公开快照", async () => {
+  const project = await createProject({
+    name: "多图指南",
+    url: "http://127.0.0.1:8081",
+    publicBrowser: { enabled: false },
+  });
+  const guideId = randomUUID(),
+    docId = randomUUID(),
+    firstImage = randomUUID(),
+    secondImage = randomUUID();
+  const png = await sharp({
+    create: { width: 40, height: 30, channels: 3, background: "#123456" },
+  })
+    .png()
+    .toBuffer();
+  await mkdir(path.join(projectDir(project.key), "artifacts"), {
+    recursive: true,
+  });
+  for (const imageId of [firstImage, secondImage])
+    await writeFile(
+      path.join(projectDir(project.key), "artifacts", imageId + ".png"),
+      png,
+    );
+  await atomic(
+    path.join(projectDir(project.key), "documents", docId + ".json"),
+    {
+      id: docId,
+      moduleId: "multi",
+      title: "多图步骤",
+      summary: "两步合一",
+      steps: [
+        {
+          title: "查看入口",
+          instruction: "先看按钮位置。",
+          expectedResult: "看到保存按钮。",
+          images: [
+            { imageId: firstImage, caption: "入口" },
+            { imageId: secondImage },
+          ],
+        },
+      ],
+    },
+  );
+  await atomic(
+    path.join(projectDir(project.key), "guides", guideId + ".json"),
+    {
+      id: guideId,
+      title: "多图指南",
+      overview: "完整说明",
+      audience: ["新用户"],
+      prerequisites: ["已登录"],
+      modules: [{ id: "multi", title: "多图步骤", documentId: docId }],
+      limitations: [],
+    },
+  );
+  const publication = await publishGuide(project.key, "guides", guideId, true);
+  assert.equal(publication.version, 1);
+  const snapshot = await publicGuide(project.key, guideId);
+  assert.equal(snapshot.summary, "完整说明");
+  assert.deepEqual(snapshot.audience, ["新用户"]);
+  assert.deepEqual(snapshot.prerequisites, ["已登录"]);
+  assert.equal(snapshot.modules[0].steps[0].expectedResult, "看到保存按钮。");
+  assert.equal(snapshot.modules[0].steps[0].imageId, firstImage);
+  assert.deepEqual(snapshot.modules[0].steps[0].images, [
+    { imageId: firstImage, caption: "入口" },
+    { imageId: secondImage },
+  ]);
+  assert.ok(
+    (await publicGuideImage(project.key, guideId, secondImage)).equals(png),
+  );
+});
+
+test("页面贯通审核发布、图文阅读、撤回和重新发布，用户 QA 仍为文字", async () => {
   const f = await fixture("页面发布验收");
   await saveQa(f.project.key, {
     question: "如何操作？",

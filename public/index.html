@@ -8,217 +8,366 @@
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <aside>
-      <a class="brand" href="/"
-        >◈ <span>LumiWiki<small>让系统更容易上手</small></span></a
-      >
-      <nav id="nav">
-        <button data-view="overview" class="selected">概览与项目</button
-        ><button data-view="knowledge">知识库</button
-        ><button data-view="agent">助手与指南</button
-        ><button data-view="documents">生成产物</button
-        ><button data-view="qa">问答审核</button>
-      </nav>
-      <div class="aside-bottom">
-        <a href="/user" target="_blank">打开用户问答 ↗</a
-        ><span>本地运行 · Pi SDK</span>
+    <header class="app-bar">
+      <a class="brand" href="/">◇ <span>LumiWiki</span></a>
+      <div class="project-picker">
+        <span id="project-name">尚未选择项目</span
+        ><select id="project-select" aria-label="切换项目" disabled>
+          <option value="">选择项目</option>
+        </select>
       </div>
-    </aside>
+      <div class="header-actions">
+        <button id="refresh" aria-label="刷新项目">↻</button
+        ><button data-view="config" id="open-config">☷ 项目配置</button>
+      </div>
+    </header>
     <main>
-      <header>
-        <div>
-          <span class="eyebrow">WORKSPACE</span>
-          <h1 id="heading">概览与项目</h1>
-        </div>
-        <div class="header-right">
-          <span id="project-name" class="badge">尚未选择项目</span
-          ><button id="refresh">刷新</button>
-        </div>
-      </header>
-      <p id="notice" role="status"></p>
-      <section id="auth" class="card">
-        <h2>连接管理台</h2>
-        <p>
-          填写项目本地 <code>.env</code> 中的
-          <code>QA_ADMIN_TOKEN</code>。口令仅保存在当前标签页。
-        </p>
-        <form id="auth-form" class="row">
-          <input
-            id="token"
-            type="password"
-            placeholder="管理口令"
-            required
-            autocomplete="off"
-          /><button class="primary">连接</button>
+      <section id="auth" class="surface auth-panel">
+        <small>LUMIWIKI WORKSPACE</small>
+        <h1>连接你的工作空间</h1>
+        <p>输入本地管理口令，管理项目指南和问答。</p>
+        <form id="auth-form" class="stack">
+          <label
+            >管理口令<input
+              id="token"
+              type="password"
+              required
+              autocomplete="off" /></label
+          ><button class="primary">连接管理台</button>
         </form>
       </section>
-      <div id="admin" hidden>
-        <section data-panel="overview">
-          <div id="status-grid" class="status-grid"></div>
-          <div class="columns">
-            <section class="card">
-              <h2>当前项目</h2>
-              <p class="muted">
-                源码交给 DeepWiki 生成知识库，助手结合知识库与真实页面工作。
-              </p>
-              <div id="projects"></div>
-            </section>
-            <section class="card">
-              <h2>新建项目</h2>
-              <form id="project-form" class="stack">
-                <label
-                  >项目名称<input
-                    name="name"
-                    required
-                    placeholder="例如：Gymbook 场馆预约系统" /></label
-                ><label
-                  >本地源码目录<input
-                    name="path"
-                    placeholder="/path/to/project" /></label
-                ><label
-                  >目标网页<input
-                    name="url"
-                    type="url"
-                    placeholder="http://127.0.0.1:9098" /></label
-                ><button class="primary">创建并切换</button>
-              </form>
-            </section>
+      <div id="admin" class="workspace" hidden>
+        <aside class="sidebar">
+          <div class="nav-label">工作空间</div>
+          <nav id="nav" aria-label="工作空间栏目">
+            <button data-view="guides" class="selected">
+              ▤ <span>快速上手</span></button
+            ><button data-view="qa">☷ <span>QA 问答</span></button
+            ><button data-view="config">⚙ <span>项目配置</span></button>
+          </nav>
+          <div class="sidebar-bottom">
+            <a id="public-link" href="/user" target="_blank" rel="noopener"
+              >打开用户帮助 ↗</a
+            ><span>产物按项目保存</span>
           </div>
-          <section class="card callout">
-            <h2>先连接材料，再生成指南</h2>
-            <p>
-              在知识库中生成或导入
-              Wiki，在助手中连接浏览器。人工登录后，也可以让助手继续观察、操作和截图。
-            </p>
-            <p class="muted">
-              模型 API 地址、密钥和名称分别在 .env
-              中填写。修改后重启服务。源码变化暂不自动检测。
-            </p>
-          </section>
-        </section>
-        <section data-panel="knowledge" hidden>
-          <section class="card">
-            <div class="row spread">
-              <div>
-                <h2>项目知识库</h2>
-                <p class="muted">
-                  按页阅读，保留来源。小型知识库全文注入，大型知识库按目录读取。
+        </aside>
+        <div class="workspace-content">
+          <header class="page-header">
+            <div>
+              <h1 id="heading">快速上手</h1>
+              <p id="view-description">创建、阅读和管理这个项目的上手指南。</p>
+            </div>
+            <div class="row">
+              <button id="new-guide" class="primary">＋ 生成指南</button
+              ><button id="new-qa" class="primary" hidden>＋ 新增问答</button>
+            </div>
+          </header>
+          <p id="notice" role="status" aria-live="polite"></p>
+          <section data-panel="guides">
+            <section id="guide-composer" class="surface composer" hidden>
+              <div class="row spread">
+                <h2>生成快速上手指南</h2>
+                <button id="close-composer" class="quiet">收起 ↑</button>
+              </div>
+              <div class="browser-row">
+                <p id="browser-status">浏览器未连接；可以先阅读知识库。</p>
+                <div class="row">
+                  <button id="connect-browser">连接目标网页</button
+                  ><button id="new-session">新会话</button>
+                </div>
+              </div>
+              <p id="guide-task-status" class="task-progress" role="status"></p>
+              <div id="messages" class="messages" aria-live="polite">
+                <p class="empty">
+                  说明面向谁、需要覆盖哪些任务，助手会生成并保存指南。
                 </p>
               </div>
-              <span id="wiki-mode" class="badge"></span>
+              <form id="ask-form" class="stack">
+                <label for="question">希望生成什么内容？</label
+                ><textarea
+                  id="question"
+                  rows="3"
+                  placeholder="例如：为新用户生成创建笔记、添加标签和搜索笔记的上手指南"
+                  required
+                ></textarea>
+                <div class="row spread">
+                  <label class="inline"
+                    ><input
+                      id="quick-start"
+                      type="checkbox"
+                      checked
+                    />生成完整上手指南</label
+                  >
+                  <div class="row">
+                    <button type="button" id="stop" hidden>停止</button
+                    ><button class="primary" id="ask-button">开始生成</button>
+                  </div>
+                </div>
+              </form>
+            </section>
+            <section id="guide-tasks" class="surface task-list" hidden>
+              <h2>指南任务</h2>
+            </section>
+            <div class="library">
+              <aside class="library-list">
+                <div class="list-heading">
+                  <span>已保存的指南与文档</span
+                  ><span id="guide-count">0 份</span>
+                </div>
+                <div id="outputs"></div>
+              </aside>
+              <article id="guide-detail" class="library-detail">
+                <p class="empty">
+                  还没有指南。点击「生成指南」，完成后会自动保存在这里。
+                </p>
+              </article>
             </div>
-            <div class="row">
-              <button id="generate-wiki" class="primary">
-                通过 DeepWiki 生成</button
-              ><label class="file-label"
-                >导入 Markdown<input
-                  id="wiki-upload"
-                  type="file"
-                  accept=".md,.markdown"
-                  multiple /></label
-              ><button id="import-generated">导入已生成的 Wiki</button>
-            </div>
-            <p id="wiki-progress" class="muted"></p>
           </section>
-          <div id="wiki-files"></div>
-        </section>
-        <section data-panel="agent" hidden>
-          <div class="card row spread">
-            <div>
-              <h2>项目助手</h2>
-              <p id="browser-status" class="muted">
-                浏览器未连接；仍可阅读已导入的知识库。
+          <section data-panel="qa" hidden>
+            <details class="surface qa-compose">
+              <summary>向助手提问，生成文字问答</summary>
+              <p>
+                回答保存后默认可用，并标记为尚未人工核验。需要核对页面时，可以连接目标网页。
               </p>
+              <form id="qa-ask-form" class="stack">
+                <label for="qa-question">问题</label
+                ><textarea
+                  id="qa-question"
+                  rows="2"
+                  placeholder="例如：怎样查找以前保存的笔记？"
+                  required
+                ></textarea>
+                <div class="row spread">
+                  <button type="button" id="qa-connect-browser">
+                    连接目标网页
+                  </button>
+                  <div class="row">
+                    <button type="button" id="qa-stop" hidden>停止</button
+                    ><button id="qa-ask-button" class="primary">
+                      生成回答并保存
+                    </button>
+                  </div>
+                </div>
+              </form>
+              <div id="qa-messages" class="messages" aria-live="polite"></div>
+            </details>
+            <div class="library">
+              <aside class="library-list">
+                <div class="list-heading">
+                  <span>已保存的问答</span><span id="qa-count">0 条</span>
+                </div>
+                <div id="qa-list"></div>
+              </aside>
+              <article id="qa-detail" class="library-detail">
+                <p class="empty">
+                  指南整理的问答和人工新增的答案，都会保存在这里。
+                </p>
+              </article>
             </div>
-            <div class="row">
-              <button id="connect-browser">连接目标网页</button
-              ><button id="new-session">新会话</button>
+          </section>
+          <section data-panel="config" hidden>
+            <div class="settings-grid">
+              <section class="surface" id="project-settings" hidden>
+                <h2>当前项目设置</h2>
+                <form id="project-settings-form" class="stack">
+                  <label
+                    >目标网页（快速上手与问答共用）<input
+                      id="project-target-url"
+                      type="url"
+                  /></label>
+                  <label class="inline"
+                    ><input
+                      id="public-browser-enabled"
+                      type="checkbox"
+                    />允许用户问答通过浏览器探索此项目</label
+                  >
+                  <p class="muted">
+                    快速上手和用户问答共用此网址及已登录的浏览器会话。先连接目标网页并登录，后续探索继续使用同一会话；繁忙时请等待当前任务完成。
+                  </p>
+                  <div class="columns">
+                    <label
+                      >测试账号<input
+                        id="public-browser-username"
+                        autocomplete="off"
+                    /></label>
+                    <label
+                      >测试密码<input
+                        id="public-browser-password"
+                        type="password"
+                        autocomplete="new-password"
+                    /></label>
+                  </div>
+                  <label class="inline" id="clear-public-password-label" hidden
+                    ><input
+                      id="clear-public-password"
+                      type="checkbox"
+                    />清除已保存的测试密码</label
+                  >
+                  <div><button class="primary">保存项目设置</button></div>
+                </form>
+              </section>
+              <section class="surface">
+                <h2>项目管理</h2>
+                <div id="projects"></div>
+                <details class="create-project">
+                  <summary>＋ 新建项目</summary>
+                  <form id="project-form" class="stack">
+                    <label
+                      >项目名称<input
+                        name="name"
+                        required
+                        placeholder="例如：团队知识库" /></label
+                    ><label
+                      >本地源码目录<input
+                        name="path"
+                        placeholder="/path/to/project" /></label
+                    ><label
+                      >目标网页<input
+                        name="url"
+                        type="url"
+                        placeholder="http://127.0.0.1:8081" /></label
+                    ><button class="primary">创建并切换</button>
+                  </form>
+                </details>
+              </section>
+              <section class="surface">
+                <div class="row spread">
+                  <h2>项目知识库</h2>
+                  <span id="wiki-mode" class="badge"></span>
+                </div>
+                <p>从源码生成 Wiki，或导入已有 Markdown，供指南和 QA 共用。</p>
+                <div class="row">
+                  <button id="generate-wiki" class="primary">
+                    通过 DeepWiki 生成</button
+                  ><label class="file-label"
+                    >导入 Markdown<input
+                      id="wiki-upload"
+                      type="file"
+                      accept=".md,.markdown"
+                      multiple /></label
+                  ><button id="import-generated">导入已生成的 Wiki</button>
+                </div>
+                <p id="wiki-progress" class="task-progress" role="status"></p>
+                <div id="wiki-files"></div>
+              </section>
+              <section class="surface">
+                <h2>模型与服务</h2>
+                <div id="status-grid" class="status-list"></div>
+                <p class="muted">
+                  模型地址、名称和密钥在本地 .env 中配置，修改后重启服务。
+                </p>
+              </section>
             </div>
-          </div>
-          <section class="card">
-            <div id="messages" class="messages">
-              <p class="empty">
-                从一个具体问题开始，或生成一份带真实截图的上手指南。
-              </p>
+          </section>
+        </div>
+      </div>
+      <section id="user" class="public-workspace" hidden>
+        <div class="surface">
+          <small>LUMIWIKI HELP</small>
+          <h1 id="user-title">系统使用助手</h1>
+          <p>阅读已发布的上手指南，或通过 QA 查询具体操作。</p>
+          <nav class="public-tabs" aria-label="帮助中心栏目">
+            <button
+              type="button"
+              data-public-view="guides"
+              class="selected"
+              aria-pressed="true"
+            >
+              快速上手</button
+            ><button type="button" data-public-view="qa" aria-pressed="false">
+              QA 问答
+            </button>
+          </nav>
+          <section id="public-guides" data-public-panel="guides">
+            <div class="library">
+              <aside class="library-list">
+                <div class="list-heading">
+                  <span>快速上手指南</span
+                  ><span id="public-guide-count">0 份</span>
+                </div>
+                <div id="public-guide-list"></div>
+              </aside>
+              <article id="public-guide-detail" class="library-detail">
+                <p class="empty">选择一份指南，查看操作步骤和配图。</p>
+              </article>
             </div>
-            <form id="ask-form" class="stack">
-              <textarea
-                id="question"
+          </section>
+          <section id="public-qa" data-public-panel="qa" hidden>
+            <div id="recommended" class="row"></div>
+            <div id="user-messages" class="messages" aria-live="polite"></div>
+            <form id="user-form" class="stack">
+              <label for="user-question">你的问题</label
+              ><textarea
+                id="user-question"
                 rows="3"
-                placeholder="例如：请为普通用户生成注册、充值、预约与取消预约的上手指南"
+                placeholder="你想了解系统的什么功能？"
                 required
               ></textarea>
-              <div class="row spread">
-                <label class="inline"
-                  ><input
-                    id="quick-start"
-                    type="checkbox"
-                  />生成完整上手指南</label
-                >
-                <div class="row">
-                  <button type="button" id="stop" hidden>停止</button
-                  ><button class="primary" id="ask-button">发送</button>
-                </div>
+              <div class="row">
+                <button class="primary" id="user-submit" disabled>提问</button
+                ><button type="button" id="user-stop" hidden>停止</button>
               </div>
             </form>
           </section>
-        </section>
-        <section data-panel="documents" hidden>
-          <section class="card">
-            <h2>指南与文档</h2>
-            <p class="muted">
-              文档含实际读取的依据；HTML 和 Markdown
-              的截图可离线使用。生成结果需人工复核。
-            </p>
-            <div id="outputs"></div>
-          </section>
-        </section>
-        <section data-panel="qa" hidden>
-          <div class="columns">
-            <section class="card">
-              <h2>问答草稿与审核</h2>
-              <p class="muted">
-                只有确认过的问答参与直答。高相似度直答，中相似度由 Judge
-                判断，低相似度进入探索 Agent。
-              </p>
-              <div id="qa-list"></div>
-            </section>
-            <section class="card">
-              <h2>新增问答草稿</h2>
-              <form id="qa-form" class="stack">
-                <label>问题<input name="question" required /></label
-                ><label
-                  >答案<textarea
-                    name="answer"
-                    required
-                    rows="6"
-                  ></textarea></label
-                ><button class="primary">保存草稿</button>
-              </form>
-            </section>
-          </div>
-        </section>
-      </div>
-      <section id="user" hidden>
-        <div class="card">
-          <h2 id="user-title">系统使用助手</h2>
-          <p class="muted">先查找已审核的回答，再按需探索专用测试系统。</p>
-          <div id="recommended" class="row"></div>
-          <div id="user-messages" class="messages"></div>
-          <form id="user-form" class="stack">
-            <textarea
-              id="user-question"
-              rows="3"
-              placeholder="你想了解系统的什么功能？"
-              required
-            ></textarea>
-            <div class="row">
-              <button class="primary" id="user-submit">提问</button
-              ><button type="button" id="user-stop" hidden>停止</button>
-            </div>
-          </form>
         </div>
       </section>
     </main>
+    <dialog id="publication-review">
+      <form id="publication-form" class="stack">
+        <div class="row spread">
+          <h2>审核并发布指南</h2>
+          <button
+            type="button"
+            id="close-publication-review"
+            class="quiet"
+            aria-label="取消发布"
+          >
+            ×
+          </button>
+        </div>
+        <h3 id="publication-title"></h3>
+        <p>
+          确认预览中的操作步骤、截图和适用范围后发布。用户将阅读这一版内容；之后修改草稿不会自动更新公开版本。
+        </p>
+        <label class="inline"
+          ><input
+            id="publication-reviewed"
+            type="checkbox"
+            required
+          />我已审核内容、截图和限制说明，确认可以向用户发布</label
+        >
+        <p id="publication-error" role="alert" class="error"></p>
+        <button class="primary">确认审核并发布</button>
+      </form>
+    </dialog>
+    <dialog id="qa-editor">
+      <form id="qa-form" class="stack">
+        <div class="row spread">
+          <h2 id="qa-editor-title">新增问答</h2>
+          <button
+            type="button"
+            id="close-qa-editor"
+            class="quiet"
+            aria-label="关闭问答编辑"
+          >
+            ×
+          </button>
+        </div>
+        <input name="id" type="hidden" /><label
+          >问题<input name="question" required maxlength="16000" /></label
+        ><label
+          >文字答案<textarea
+            name="answer"
+            required
+            rows="7"
+            maxlength="30000"
+          ></textarea>
+        </label>
+        <p class="muted">
+          保存后标记为未核验，可用问答参与用户直答；停用的问答保持停用。
+        </p>
+        <button class="primary">保存问答</button>
+      </form>
+    </dialog>
   </body>
 </html>
