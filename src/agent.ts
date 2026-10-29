@@ -14,7 +14,12 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { config, ensure } from "./config.js";
-import { atomic, projectDir, type Project } from "./store.js";
+import {
+  atomic,
+  projectDir,
+  publicBrowserSettings,
+  type Project,
+} from "./store.js";
 import { readPage, wikiContext } from "./knowledge.js";
 import { projectSkills, runPrompt, quickStartReference } from "./skills.js";
 import { renderGuideHtml } from "./guide-html.js";
@@ -97,6 +102,7 @@ async function createConversation(
     ? { full: false, content: "", pages: [] }
     : await wikiContext(project.key);
   const browser = browserId ? getBrowser(browserId, project.key) : undefined;
+  const credentials = publicBrowserSettings(project);
   const id = randomUUID();
   const ledger = new Set<string>(wiki.full ? wiki.pages.map((p) => p.id) : []);
   const documentIds = new Set<string>();
@@ -338,17 +344,13 @@ async function createConversation(
           },
         }),
       );
-    if (
-      publicMode &&
-      process.env.PUBLIC_TEST_USERNAME &&
-      process.env.PUBLIC_TEST_PASSWORD
-    )
+    if (publicMode && credentials.username && credentials.password)
       tools.push(
         defineTool({
           name: "browser_login",
           label: "测试账号登录",
           description:
-            "使用服务器配置的专用测试账号填写登录表单，凭证不返回给模型。输入观察得到的用户名、密码、提交控件 ref。",
+            "使用当前项目配置的测试账号填写登录表单，凭证不返回给模型。输入观察得到的用户名、密码、提交控件 ref。",
           parameters: Type.Object({
             usernameRef: Type.String(),
             passwordRef: Type.String(),
@@ -359,12 +361,8 @@ async function createConversation(
             for (const r of [p.usernameRef, p.passwordRef, p.submitRef])
               ensure(browser.refs.has(r), "登录控件 ref 无效");
             quickStart.mutated(true);
-            await resolveRef(browser, p.usernameRef).fill(
-              process.env.PUBLIC_TEST_USERNAME!,
-            );
-            await resolveRef(browser, p.passwordRef).fill(
-              process.env.PUBLIC_TEST_PASSWORD!,
-            );
+            await resolveRef(browser, p.usernameRef).fill(credentials.username);
+            await resolveRef(browser, p.passwordRef).fill(credentials.password);
             await resolveRef(browser, p.submitRef).click();
             return textResult(await observe(browser));
           },
