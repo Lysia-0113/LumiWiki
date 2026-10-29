@@ -724,3 +724,10 @@ dialog .quiet {
     gap: 5px;
   }
 }
+.task-list {
+  margin-bottom: 22px;
+}
+.task-list .item p {
+  font-size: 13px;
+  color: var(--muted);
+}

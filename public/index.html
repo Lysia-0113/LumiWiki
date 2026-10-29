@@ -75,6 +75,7 @@
                   ><button id="new-session">新会话</button>
                 </div>
               </div>
+              <p id="guide-task-status" class="task-progress" role="status"></p>
               <div id="messages" class="messages" aria-live="polite">
                 <p class="empty">
                   说明面向谁、需要覆盖哪些任务，助手会生成并保存指南。
@@ -102,6 +103,9 @@
                   </div>
                 </div>
               </form>
+            </section>
+            <section id="guide-tasks" class="surface task-list" hidden>
+              <h2>指南任务</h2>
             </section>
             <div class="library">
               <aside class="library-list">
@@ -160,6 +164,49 @@
           </section>
           <section data-panel="config" hidden>
             <div class="settings-grid">
+              <section class="surface" id="project-settings" hidden>
+                <h2>当前项目设置</h2>
+                <form id="project-settings-form" class="stack">
+                  <label
+                    >目标网页<input id="project-target-url" type="url"
+                  /></label>
+                  <label class="inline"
+                    ><input
+                      id="public-browser-enabled"
+                      type="checkbox"
+                    />允许用户问答通过浏览器探索此项目</label
+                  >
+                  <label
+                    >问答探索地址（选填）<input
+                      id="public-browser-url"
+                      type="url"
+                      placeholder="留空使用上方目标网页"
+                  /></label>
+                  <p class="muted">
+                    默认探索当前项目的目标网页；若有独立测试环境，可在这里填写它的网址。
+                  </p>
+                  <div class="columns">
+                    <label
+                      >测试账号<input
+                        id="public-browser-username"
+                        autocomplete="off"
+                    /></label>
+                    <label
+                      >测试密码<input
+                        id="public-browser-password"
+                        type="password"
+                        autocomplete="new-password"
+                    /></label>
+                  </div>
+                  <label class="inline" id="clear-public-password-label" hidden
+                    ><input
+                      id="clear-public-password"
+                      type="checkbox"
+                    />清除已保存的测试密码</label
+                  >
+                  <div><button class="primary">保存项目设置</button></div>
+                </form>
+              </section>
               <section class="surface">
                 <h2>项目管理</h2>
                 <div id="projects"></div>

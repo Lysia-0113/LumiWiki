@@ -6,6 +6,10 @@ const state = {
   projects: [],
   session: null,
   qaSession: null,
+  resumeTaskId: null,
+  acknowledgePending: false,
+  guideTaskTimer: null,
+  lastResult: null,
   browser: null,
   controller: null,
   view: "guides",
@@ -92,6 +96,8 @@ function checkIdle() {
 }
 async function setView(view) {
   state.view = view;
+  clearTimeout(state.guideTaskTimer);
+  state.guideTaskTimer = null;
   document
     .querySelectorAll("[data-panel]")
     .forEach((el) => (el.hidden = el.dataset.panel !== view));
@@ -123,6 +129,11 @@ async function refresh() {
   if (previous !== state.project?.key) {
     clearImages();
     clearTimeout(state.taskTimer);
+    clearTimeout(state.guideTaskTimer);
+    state.guideTaskTimer = null;
+    state.resumeTaskId = null;
+    state.acknowledgePending = false;
+    $("#guide-task-status").textContent = "";
     state.session = null;
     state.qaSession = null;
     state.browser = null;
@@ -196,6 +207,7 @@ async function loadView() {
       ...docs.items.map((doc) => ({ ...doc, kind: "documents" })),
     ].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
     renderGuides();
+    await loadGuideTasks();
   }
   if (state.view === "qa") {
     const [data, guides] = await Promise.all([
@@ -445,6 +457,7 @@ function editQa(qa) {
   $("#qa-editor").showModal();
 }
 async function loadConfig() {
+  populateProjectSettings();
   const status = await api("/api/v1/admin/status");
   $("#status-grid").replaceChildren();
   let dw = false;
@@ -477,20 +490,21 @@ async function loadConfig() {
     if (project.key !== state.project?.key)
       actions.append(button("切换项目", () => activate(project.key)));
     else actions.append(node("span", "当前项目", "badge"));
-    actions.append(
-      button("编辑", async () => {
-        checkIdle();
-        const name = prompt("项目名称", project.name);
-        if (name === null) return;
-        const url = prompt("目标网页", project.url || "");
-        if (url === null) return;
-        await api("/api/projects/" + project.key, {
-          method: "PATCH",
-          body: JSON.stringify({ name, ...(url ? { url } : {}) }),
-        });
-        await refresh();
-      }),
-    );
+    if (project.key === state.project?.key)
+      actions.append(
+        button("编辑", async () => {
+          checkIdle();
+          const name = prompt("项目名称", project.name);
+          if (name === null) return;
+          const url = prompt("目标网页", project.url || "");
+          if (url === null) return;
+          await api("/api/projects/" + project.key, {
+            method: "PATCH",
+            body: JSON.stringify({ name, ...(url ? { url } : {}) }),
+          });
+          await refresh();
+        }),
+      );
     item.append(actions);
     $("#projects").append(item);
   }
@@ -567,6 +581,8 @@ async function stream(
   sessionSlot = "session",
   onArtifact = () => {},
 ) {
+  let resultReceived = false;
+  state.lastResult = null;
   const controller = new AbortController();
   state.controller = controller;
   const response = await fetch(route, {
@@ -601,8 +617,24 @@ async function stream(
         const event = JSON.parse(line.slice(6));
         if (event.type === "session" && !isPublic)
           state[sessionSlot] = event.sessionId;
+        if (
+          event.type === "guide_task" &&
+          !isPublic &&
+          sessionSlot === "session"
+        ) {
+          state.resumeTaskId = event.task.id;
+          $("#guide-task-status").textContent = taskProgress(event.task);
+          if (!state.guideTaskTimer && state.view === "guides")
+            state.guideTaskTimer = setTimeout(
+              () =>
+                loadGuideTasks().catch((error) => notice(error.message, true)),
+              2000,
+            );
+        }
         if (event.type === "text") answer.textContent += event.text;
         if (event.type === "done") {
+          resultReceived = true;
+          state.lastResult = event.result;
           finalAnswer = event.result.answer;
           answer.textContent = finalAnswer;
         }
@@ -634,6 +666,8 @@ async function stream(
     if (done) break;
   }
   if (failed) throw Error("本轮未完成，请查看任务提示。");
+  if (!resultReceived)
+    throw Error("连接已中断，未完成的答案不会保存；指南可在任务列表中继续。");
   return finalAnswer || answer.textContent;
 }
 async function runGuide(event) {
@@ -652,7 +686,11 @@ async function runGuide(event) {
       {
         question,
         projectKey: state.project.key,
-        sessionId: state.session || undefined,
+        sessionId: state.resumeTaskId ? undefined : state.session || undefined,
+        taskId: $("#quick-start").checked
+          ? state.resumeTaskId || undefined
+          : undefined,
+        acknowledgePending: state.acknowledgePending,
         browserId: state.browser || undefined,
         mode: $("#quick-start").checked ? "quick_start" : "chat",
       },
@@ -666,10 +704,17 @@ async function runGuide(event) {
     );
     $("#question").value = "";
     await loadView();
+    const outcome = state.lastResult?.outcome;
+    state.acknowledgePending = false;
+    if (["completed", "partial"].includes(outcome)) state.resumeTaskId = null;
     notice(
-      saved
-        ? "本轮完成，生成产物已保存。"
-        : "本轮已结束，未生成新的指南或文档，请查看任务结果。",
+      ["paused", "blocked"].includes(outcome)
+        ? "指南尚未完成，进度已保存，可继续任务。"
+        : outcome === "partial"
+          ? "指南已保存，部分场景存在限制，请查看指南内容。"
+          : saved
+            ? "本轮完成，生成产物已保存。"
+            : "本轮已结束，未生成新的指南或文档，请查看任务结果。",
     );
   } catch (error) {
     notice(
@@ -680,6 +725,8 @@ async function runGuide(event) {
     busy(false);
     $("#stop").hidden = true;
     state.controller = null;
+    if (state.view === "guides" && state.project)
+      await loadGuideTasks().catch((error) => notice(error.message, true));
   }
 }
 async function runQa(event) {
@@ -822,6 +869,9 @@ $("#connect-browser").onclick = () =>
 $("#qa-connect-browser").onclick = $("#connect-browser").onclick;
 $("#new-session").onclick = () => {
   state.session = null;
+  state.resumeTaskId = null;
+  state.acknowledgePending = false;
+  $("#guide-task-status").textContent = "";
   $("#messages").replaceChildren(node("p", "新会话已就绪。", "empty"));
 };
 $("#ask-form").onsubmit = runGuide;
@@ -936,3 +986,118 @@ if (["/user", "/help"].includes(location.pathname)) {
     notice(error.message, true);
     sessionStorage.removeItem("lumiwiki.token");
   });
+
+function taskProgress(task) {
+  const status =
+    {
+      running: "处理中",
+      paused: "已暂停，可继续",
+      blocked: "受阻，待处理",
+      completed: "完整指南已保存",
+      partial: "指南已保存，部分场景未完成",
+    }[task.status] || task.status;
+  return `${status} · 已保存 ${task.modulesSaved}/${task.modulesTotal} 个模块 · 已核验 ${task.scenariosVerified}/${task.scenariosTotal} 个场景`;
+}
+async function loadGuideTasks() {
+  clearTimeout(state.guideTaskTimer);
+  state.guideTaskTimer = null;
+  if (!state.project || state.view !== "guides") return;
+  const key = state.project.key,
+    base = requireProject(),
+    { items } = await api(base + "/tasks");
+  if (state.project?.key !== key || state.view !== "guides") return;
+  const panel = $("#guide-tasks");
+  panel.replaceChildren(node("h2", "指南任务"));
+  panel.hidden = !items.length;
+  for (const task of items) {
+    const item = node("div", undefined, "item");
+    item.append(node("strong", task.title), node("p", taskProgress(task)));
+    if (task.error) item.append(node("p", task.error, "muted"));
+    if (["paused", "blocked"].includes(task.status))
+      item.append(
+        button("继续任务", () => {
+          checkIdle();
+          if (
+            task.requiresReview &&
+            !confirm(
+              "上次操作可能已执行。请先在目标网页人工核对结果，确认无需重复提交后再继续。是否已完成核对？",
+            )
+          )
+            return;
+          state.resumeTaskId = task.id;
+          state.acknowledgePending = task.requiresReview;
+          $("#guide-composer").hidden = false;
+          $("#quick-start").checked = true;
+          $("#question").value =
+            "继续当前指南任务，保留原计划和已有成果，完成剩余模块并汇总。";
+          if (task.browserRequired && !state.browser) {
+            notice("请先连接目标网页并登录，再点击开始生成继续当前任务。");
+            return;
+          }
+          $("#ask-form").requestSubmit();
+        }),
+      );
+    panel.append(item);
+  }
+  if (items.some((task) => task.status === "running"))
+    state.guideTaskTimer = setTimeout(
+      () => loadGuideTasks().catch((error) => notice(error.message, true)),
+      2000,
+    );
+}
+function populateProjectSettings() {
+  $("#project-settings").hidden = !state.project;
+  if (!state.project) return;
+  const settings = state.project.publicBrowser || {};
+  $("#project-target-url").value = state.project.url || "";
+  $("#public-browser-enabled").checked = Boolean(settings.enabled);
+  $("#public-browser-url").value = settings.url || "";
+  $("#public-browser-url").placeholder =
+    state.project.url || "留空使用目标网页";
+  $("#public-browser-username").value = settings.username || "";
+  $("#public-browser-password").value = "";
+  $("#public-browser-password").placeholder = settings.passwordConfigured
+    ? "已保存，留空保留原密码"
+    : "未设置";
+  $("#clear-public-password").checked = false;
+  $("#clear-public-password-label").hidden = !settings.passwordConfigured;
+}
+$("#project-settings-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const submit = event.target.querySelector("button");
+  submit.disabled = true;
+  try {
+    checkIdle();
+    const password = $("#public-browser-password").value,
+      url = $("#project-target-url").value,
+      targetChanged = url !== (state.project?.url || "");
+    await api(requireProject(), {
+      method: "PATCH",
+      body: JSON.stringify({
+        url,
+        publicBrowser: {
+          enabled: $("#public-browser-enabled").checked,
+          url: $("#public-browser-url").value,
+          username: $("#public-browser-username").value,
+          ...($("#clear-public-password").checked
+            ? { password: "" }
+            : password
+              ? { password }
+              : {}),
+        },
+      }),
+    });
+    if (targetChanged) {
+      state.browser = null;
+      state.session = null;
+      state.qaSession = null;
+      $("#browser-status").textContent = "浏览器未连接；可以先阅读知识库。";
+    }
+    await refresh();
+    notice("当前项目的设置已保存，后续问答将使用这些配置。");
+  } catch (error) {
+    notice(error.message, true);
+  } finally {
+    submit.disabled = false;
+  }
+};

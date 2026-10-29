@@ -11,8 +11,12 @@ import {
   getProject,
   json,
   listProjects,
+  migrateProjectSettings,
   projectDir,
+  publicBrowserSettings,
+  updateProject,
   validId,
+  type Project,
 } from "./store.js";
 import { deleteWiki, importWiki, listWiki, parseWiki } from "./knowledge.js";
 import {
@@ -25,6 +29,11 @@ import {
 } from "./browser.js";
 import { ask, disposeConversations } from "./agent.js";
 import {
+  getGuideTask,
+  listGuideTasks,
+  guideTaskSummary,
+} from "./guide-tasks.js";
+import {
   deepwikiRequest,
   submitWiki,
   wikiTask,
@@ -34,6 +43,13 @@ import { listQa, matchQa, publicQa, saveQa } from "./qa.js";
 import { generateGuideQa } from "./quick-start-qa.js";
 
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
+function adminProject(project: Project) {
+  const { password, ...settings } = publicBrowserSettings(project);
+  return {
+    ...project,
+    publicBrowser: { ...settings, passwordConfigured: Boolean(password) },
+  };
+}
 const send = (res: ServerResponse, status: number, value: unknown) => {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -163,13 +179,13 @@ export function createServer() {
         );
       if (route === "/api/projects" && method === "GET") {
         send(res, 200, {
-          projects: await listProjects(),
+          projects: (await listProjects()).map(adminProject),
           activeProjectId: await activeProject(),
         });
         return;
       }
       if (route === "/api/projects" && method === "POST") {
-        send(res, 201, await createProject(await body(req)));
+        send(res, 201, adminProject(await createProject(await body(req))));
         return;
       }
       const match = route.match(
@@ -188,7 +204,7 @@ export function createServer() {
           await atomic(path.join(config.data, "deployment.json"), {
             activeProjectId: id,
           });
-          send(res, 200, project);
+          send(res, 200, adminProject(project));
           return;
         }
         if (sub === "wiki" && method === "GET") {
@@ -242,6 +258,19 @@ export function createServer() {
             200,
             await wikiTask(project, sub.slice("deepwiki/tasks/".length)),
           );
+          return;
+        }
+        if (sub === "tasks" && method === "GET") {
+          send(res, 200, { items: await listGuideTasks(id) });
+          return;
+        }
+        const taskId = sub.match(/^tasks\/([a-f0-9-]{36})$/);
+        if (taskId && method === "GET") {
+          const task = await getGuideTask(id, taskId[1]);
+          send(res, 200, {
+            ...guideTaskSummary(task),
+            workflow: task.workflow,
+          });
           return;
         }
         if (sub === "qa" && method === "GET") {
@@ -301,7 +330,7 @@ export function createServer() {
           return;
         }
         if (!sub && method === "GET") {
-          send(res, 200, project);
+          send(res, 200, adminProject(project));
           return;
         }
         if (!sub && method === "DELETE") {
@@ -317,24 +346,12 @@ export function createServer() {
         }
         if (!sub && method === "PATCH") {
           const data = await body(req);
-          ensure(data.path === undefined, "源码路径创建后不可修改");
-          if (data.name !== undefined) {
-            ensure(
-              typeof data.name === "string" && data.name.trim(),
-              "名称无效",
-            );
-            project.name = data.name.trim();
+          const updated = await updateProject(id, data);
+          if (updated.url !== project.url) {
+            await disposeConversations(id);
+            await closeProjectBrowsers(id);
           }
-          if (data.url !== undefined) {
-            ensure(
-              typeof data.url === "string" &&
-                ["http:", "https:"].includes(new URL(data.url).protocol),
-              "网址无效",
-            );
-            project.url = data.url;
-          }
-          await atomic(path.join(projectDir(id), "project.json"), project);
-          send(res, 200, project);
+          send(res, 200, adminProject(updated));
           return;
         }
       }
@@ -372,6 +389,16 @@ export function createServer() {
         ensure(
           ["chat", "quick_start", "qa"].includes(data.mode || "chat"),
           "当前支持 chat / quick_start / qa",
+        );
+        ensure(
+          data.taskId === undefined ||
+            (typeof data.taskId === "string" && validId(data.taskId)),
+          "指南任务标识无效",
+        );
+        ensure(
+          data.acknowledgePending === undefined ||
+            typeof data.acknowledgePending === "boolean",
+          "核对标记无效",
         );
         const project = await getProject(data.projectKey);
         res.writeHead(200, {
@@ -455,13 +482,14 @@ export function createServer() {
                 },
               });
             } else {
-              if (process.env.PUBLIC_BROWSER_ENABLED === "true") {
-                ensure(
-                  process.env.PUBLIC_TEST_URL &&
-                    project.url === process.env.PUBLIC_TEST_URL,
-                  "公共探索必须绑定专用测试网址",
-                );
-                browserId = (await connectBrowser(project, true)).id;
+              const settings = publicBrowserSettings(project);
+              if (settings.enabled) {
+                browserId = (
+                  await connectBrowser(
+                    { ...project, url: settings.url || project.url },
+                    true,
+                  )
+                ).id;
               }
               await ask(
                 project,
@@ -517,7 +545,7 @@ export function createServer() {
 }
 export async function main() {
   await mkdir(config.data, { recursive: true, mode: 0o700 });
-  if (!(await listProjects()).length && process.env.TARGET_REPO)
+  if (!(await migrateProjectSettings()).length && process.env.TARGET_REPO)
     await createProject({
       name: path.basename(process.env.TARGET_REPO),
       path: process.env.TARGET_REPO,

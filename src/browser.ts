@@ -43,6 +43,8 @@ export async function connectBrowser(
     acceptDownloads: false,
   });
   const origin = new URL(project.url).origin;
+  context.setDefaultTimeout(10000);
+  context.setDefaultNavigationTimeout(20000);
   await context.route("**/*", async (route) => {
     const request = route.request();
     if (
@@ -163,19 +165,25 @@ export async function observe(
       .slice(-8)) {
       const popup = await s.page
         .getByRef(menu.ref!)
-        .evaluate((el) => {
-          if (el.closest('nav, aside, [role="navigation"], [role="menubar"]'))
+        .evaluate(
+          (el) => {
+            if (el.closest('nav, aside, [role="navigation"], [role="menubar"]'))
+              return false;
+            let current: Element | null = el;
+            while (current && current !== el.ownerDocument.body) {
+              if (
+                ["absolute", "fixed"].includes(
+                  getComputedStyle(current).position,
+                )
+              )
+                return true;
+              current = current.parentElement;
+            }
             return false;
-          let current: Element | null = el;
-          while (current && current !== el.ownerDocument.body) {
-            if (
-              ["absolute", "fixed"].includes(getComputedStyle(current).position)
-            )
-              return true;
-            current = current.parentElement;
-          }
-          return false;
-        })
+          },
+          undefined,
+          { timeout: 1000 },
+        )
         .catch(() => false);
       if (popup && (!focus || nodes.indexOf(menu) > nodes.indexOf(focus)))
         focus = menu;
@@ -259,73 +267,78 @@ export async function observe(
     candidates.slice(0, 200).map(async (entry) => {
       const meta = await s.page
         .getByRef(entry.nativeRef)
-        .evaluate((el) => {
-          const input = el as HTMLInputElement;
-          const summary = el.tagName === "SUMMARY";
-          const expanded = el.getAttribute("aria-expanded");
-          const popup = el.getAttribute("aria-haspopup");
-          const details = summary
-            ? (el.parentElement as HTMLDetailsElement)
-            : null;
-          const rect = el.getBoundingClientRect();
-          return {
-            tag: el.tagName.toLowerCase(),
-            type: input.type || "",
-            disabled:
-              Boolean(input.disabled) ||
-              el.getAttribute("aria-disabled") === "true",
-            expanded:
-              expanded === null
-                ? details
-                  ? details.open
-                  : undefined
-                : expanded === "true",
-            expandable:
-              expanded !== null ||
-              summary ||
-              Boolean(popup && popup !== "false"),
-            hasPopup: popup || undefined,
-            controls: el.getAttribute("aria-controls") || undefined,
-            required:
-              Boolean(input.required) ||
-              el.getAttribute("aria-required") === "true",
-            readOnly: Boolean(input.readOnly),
-            invalid:
-              el.getAttribute("aria-invalid") === "true" ||
-              ("validity" in input && !input.validity.valid),
-            description: (el.getAttribute("aria-describedby") || "")
-              .split(/\s+/)
-              .map(
-                (id) => el.ownerDocument.getElementById(id)?.textContent || "",
-              )
-              .join(" ")
-              .trim()
-              .slice(0, 500),
-            placeholder: input.placeholder || undefined,
-            options:
-              el.tagName === "SELECT"
-                ? Array.from((el as HTMLSelectElement).options)
-                    .slice(0, 50)
-                    .map((option) => ({
-                      label: option.label,
-                      value: option.value,
-                      selected: option.selected,
-                      disabled: option.disabled,
-                    }))
-                : undefined,
-            inViewport:
-              rect.bottom > 0 &&
-              rect.right > 0 &&
-              rect.top < window.innerHeight &&
-              rect.left < window.innerWidth,
-            scroll: {
-              top: el.scrollTop,
-              left: el.scrollLeft,
-              maxY: Math.max(0, el.scrollHeight - el.clientHeight),
-              maxX: Math.max(0, el.scrollWidth - el.clientWidth),
-            },
-          };
-        })
+        .evaluate(
+          (el) => {
+            const input = el as HTMLInputElement;
+            const summary = el.tagName === "SUMMARY";
+            const expanded = el.getAttribute("aria-expanded");
+            const popup = el.getAttribute("aria-haspopup");
+            const details = summary
+              ? (el.parentElement as HTMLDetailsElement)
+              : null;
+            const rect = el.getBoundingClientRect();
+            return {
+              tag: el.tagName.toLowerCase(),
+              type: input.type || "",
+              disabled:
+                Boolean(input.disabled) ||
+                el.getAttribute("aria-disabled") === "true",
+              expanded:
+                expanded === null
+                  ? details
+                    ? details.open
+                    : undefined
+                  : expanded === "true",
+              expandable:
+                expanded !== null ||
+                summary ||
+                Boolean(popup && popup !== "false"),
+              hasPopup: popup || undefined,
+              controls: el.getAttribute("aria-controls") || undefined,
+              required:
+                Boolean(input.required) ||
+                el.getAttribute("aria-required") === "true",
+              readOnly: Boolean(input.readOnly),
+              invalid:
+                el.getAttribute("aria-invalid") === "true" ||
+                ("validity" in input && !input.validity.valid),
+              description: (el.getAttribute("aria-describedby") || "")
+                .split(/\s+/)
+                .map(
+                  (id) =>
+                    el.ownerDocument.getElementById(id)?.textContent || "",
+                )
+                .join(" ")
+                .trim()
+                .slice(0, 500),
+              placeholder: input.placeholder || undefined,
+              options:
+                el.tagName === "SELECT"
+                  ? Array.from((el as HTMLSelectElement).options)
+                      .slice(0, 50)
+                      .map((option) => ({
+                        label: option.label,
+                        value: option.value,
+                        selected: option.selected,
+                        disabled: option.disabled,
+                      }))
+                  : undefined,
+              inViewport:
+                rect.bottom > 0 &&
+                rect.right > 0 &&
+                rect.top < window.innerHeight &&
+                rect.left < window.innerWidth,
+              scroll: {
+                top: el.scrollTop,
+                left: el.scrollLeft,
+                maxY: Math.max(0, el.scrollHeight - el.clientHeight),
+                maxX: Math.max(0, el.scrollWidth - el.clientWidth),
+              },
+            };
+          },
+          undefined,
+          { timeout: 1000 },
+        )
         .catch(() => ({
           tag: "unknown",
           type: "",
