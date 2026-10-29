@@ -157,7 +157,9 @@ test("独立原生Pi整理草稿：并发合并、拒绝跨模块/伪造引用�
         (q) => q.status === "draft" && q.source?.guideId === guide.id,
       ),
     );
-    assert.equal((await matchQa(p.key, "如何提交？")).decision, "agent");
+    const draftHit = await matchQa(p.key, "如何提交？");
+    assert.equal(draftHit.decision, "direct");
+    assert.equal(draftHit.qa?.status, "draft");
     const original = saved.find((q) => q.question === "如何提交？")!;
     const reviewed = await saveQa(p.key, { ...original, status: "verified" });
     assert.deepEqual(reviewed.source, original.source);
@@ -634,7 +636,9 @@ test("真实浏览器与原生Pi：目录、章节、初始QA各自独立，宿�
         ?.result.answer.includes("QA 草稿"),
     );
     assert.equal((await listQa(p.key)).length, 1);
-    assert.equal((await matchQa(p.key, question)).decision, "agent");
+    const draftHit = await matchQa(p.key, question);
+    assert.equal(draftHit.decision, "direct");
+    assert.equal(draftHit.qa?.status, "draft");
     assert.deepEqual(counts, { planner: 3, chapter: 7, qa: 2 });
   } finally {
     await close();

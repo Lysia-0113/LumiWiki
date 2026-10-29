@@ -30,7 +30,18 @@ import {
   wikiTask,
   importGeneratedWiki,
 } from "./deepwiki.js";
-import { currentQa, listQa, matchQa, publicQa, saveQa } from "./qa.js";
+import {
+  currentQa,
+  deleteQa,
+  listQa,
+  matchQa,
+  publicQa,
+  recordQaUse,
+  saveQa,
+  updateQaState,
+} from "./qa.js";
+import { admitQa } from "./qa-admission.js";
+import type { QaAnswerResult } from "./qa-result.js";
 import { generateGuideQa } from "./quick-start-qa.js";
 import { guideTaskActive } from "./guide-workflow.js";
 
@@ -258,8 +269,13 @@ export function createServer() {
           send(res, 201, await saveQa(id, await body(req)));
           return;
         }
-        if (/^qa\/[a-f0-9-]{36}$/.test(sub) && method === "DELETE") {
-          await rm(path.join(projectDir(id), sub + ".json"), { force: true });
+        const qaId = sub.match(/^qa\/([a-f0-9-]{36})$/);
+        if (qaId && method === "PATCH") {
+          send(res, 200, await updateQaState(id, qaId[1], await body(req)));
+          return;
+        }
+        if (qaId && method === "DELETE") {
+          await deleteQa(id, qaId[1]);
           send(res, 200, { ok: true });
           return;
         }
@@ -387,8 +403,8 @@ export function createServer() {
       if (route === "/api/ask" && method === "POST") {
         const data = await body(req);
         ensure(
-          ["chat", "quick_start"].includes(data.mode || "chat"),
-          "当前支持 chat / quick_start",
+          ["chat", "quick_start", "qa"].includes(data.mode || "chat"),
+          "当前支持 chat / quick_start / qa",
         );
         const project = await getProject(data.projectKey);
         res.writeHead(200, {
@@ -420,7 +436,12 @@ export function createServer() {
           send(res, 200, {
             name: project.name,
             recommendedQuestions: (await currentQa(active))
-              .filter((q) => q.status === "verified")
+              .filter((q) => q.enabled)
+              .sort(
+                (a, b) =>
+                  Number(b.status === "verified") -
+                  Number(a.status === "verified"),
+              )
               .slice(0, 6)
               .map((q) => q.question),
           });
@@ -429,7 +450,7 @@ export function createServer() {
         if (route === "/api/v1/public/qa" && method === "GET") {
           send(res, 200, {
             items: (await currentQa(active))
-              .filter((q) => q.status === "verified")
+              .filter((q) => q.enabled)
               .map(publicQa),
           });
           return;
@@ -456,18 +477,24 @@ export function createServer() {
           }, 15000);
           try {
             const matched = await matchQa(active, data.question, abort.signal);
-            if (matched.decision === "direct" && matched.qa) {
+            abort.signal.throwIfAborted();
+            const reused =
+              matched.decision === "direct" && matched.qa
+                ? await recordQaUse(active, matched.qa, data.question)
+                : undefined;
+            if (reused) {
               emit({
                 type: "qa",
-                qa: publicQa(matched.qa),
+                qa: publicQa(reused),
                 tier: matched.tier,
                 score: matched.score,
               });
               emit({
                 type: "done",
                 result: {
-                  answer: matched.qa.answer,
-                  qaId: matched.qa.id,
+                  answer: reused.answer,
+                  qaId: reused.id,
+                  qaStatus: reused.status,
                   sessionId: null,
                 },
               });
@@ -480,20 +507,65 @@ export function createServer() {
                 );
                 browserId = (await connectBrowser(project, true)).id;
               }
+              let completed: Record<string, unknown> | undefined;
               await ask(
                 project,
                 { question: data.question, browserId },
                 (e) => {
-                  if (
-                    ["text", "answer_start", "error", "done"].includes(
-                      String(e.type),
-                    )
+                  if (e.type === "done") completed = e;
+                  else if (
+                    ["text", "answer_start", "error"].includes(String(e.type))
                   )
                     emit(e);
                 },
                 abort.signal,
                 true,
               );
+              const result = completed?.result as
+                | {
+                    answer?: unknown;
+                    runId: string;
+                    sessionId: string;
+                    qaResult?: QaAnswerResult;
+                  }
+                | undefined;
+              ensure(
+                completed &&
+                  typeof result?.answer === "string" &&
+                  result.answer.trim(),
+                "回答为空，未保存草稿",
+                502,
+              );
+              abort.signal.throwIfAborted();
+              const admission = await admitQa(
+                active,
+                data.question,
+                result.qaResult,
+                result.runId,
+                abort.signal,
+              );
+              const reusable =
+                admission.qa?.enabled &&
+                ["admitted", "duplicate"].includes(admission.decision)
+                  ? admission.qa
+                  : undefined;
+              if (reusable)
+                emit({ type: "qa", qa: publicQa(reusable), tier: "generated" });
+              emit({
+                type: "done",
+                result: {
+                  answer: result.answer,
+                  sessionId: result.sessionId,
+                  runId: result.runId,
+                  qaId: reusable?.id ?? null,
+                  qaStatus: reusable?.status ?? null,
+                  answerOutcome: result.qaResult?.outcome ?? "unclassified",
+                  admission: {
+                    decision: admission.decision,
+                    reason: admission.reason,
+                  },
+                },
+              });
             }
           } catch (e) {
             emit({

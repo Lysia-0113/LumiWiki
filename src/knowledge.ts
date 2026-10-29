@@ -214,6 +214,8 @@ export async function readPage(
   const truncated = Array.from(body).length > 20000;
   return {
     pageId,
+    fileId: file.id,
+    sha256: file.sha256,
     citation: { kind: "doc" as const, location: pageId },
     ref: `wiki/${file.name}#${page.title}`,
     title: page.title,
@@ -249,5 +251,19 @@ export async function wikiContext(projectId: string, catalogOnly = false) {
     : pages
         .map((p) => `${p.id}｜${p.title}｜${p.headings.join("；")}`)
         .join("\n");
-  return { full, pages, content, files: files.length, chars: total };
+  return {
+    full,
+    pages,
+    content,
+    files: files.length,
+    chars: total,
+    evidence: files.flatMap((file) =>
+      file.pages.map((page) => ({
+        kind: "doc" as const,
+        location: page.id,
+        fileId: file.id,
+        sha256: file.sha256,
+      })),
+    ),
+  };
 }
