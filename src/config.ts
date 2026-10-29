@@ -11,7 +11,6 @@ export const config = {
   },
   wikiLimit: Number(process.env.WIKI_FULL_INJECT_MAX_CHARS || 30000),
   maxTools: Number(process.env.MAX_TOOL_CALLS || 30),
-  quickStartMaxTools: Number(process.env.QUICK_START_MAX_TOOL_CALLS || 120),
   quickStartMaxTokens: Number(process.env.QUICK_START_MAX_TOKENS || 8192),
   timeout: Number(process.env.RUN_TIMEOUT_SECONDS || 180),
   deepwiki: (process.env.DEEPWIKI_BASE_URL || "http://127.0.0.1:8001").replace(

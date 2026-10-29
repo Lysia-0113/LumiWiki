@@ -9,6 +9,9 @@ const state = {
   controller: null,
   view: "overview",
   taskTimer: null,
+  guideTaskTimer: null,
+  resumeTaskId: null,
+  acknowledgePending: false,
 };
 const notice = (message, error = false) => {
   $("#notice").textContent = message;
@@ -49,6 +52,8 @@ function requireProject() {
   return `/api/projects/${state.project.key}`;
 }
 function setView(view) {
+  clearTimeout(state.guideTaskTimer);
+  state.guideTaskTimer = null;
   state.view = view;
   document
     .querySelectorAll("[data-panel]")
@@ -69,6 +74,8 @@ async function refresh() {
   if (previous !== state.project?.key) {
     state.browser = null;
     state.session = null;
+    state.resumeTaskId = null;
+    state.acknowledgePending = false;
     $("#browser-status").textContent = "浏览器未连接；仍可阅读已导入的知识库。";
   }
   $("#project-name").textContent = state.project?.name || "尚未选择项目";
@@ -131,6 +138,43 @@ async function protectedOpen(route) {
 async function loadView() {
   if (!state.project) return;
   const base = requireProject();
+  if (state.view === "agent") {
+    clearTimeout(state.guideTaskTimer);
+    state.guideTaskTimer = null;
+    const { items } = await api(base + "/tasks");
+    const panel = $("#guide-tasks");
+    panel.replaceChildren(node("h2", "指南任务"));
+    panel.hidden = !items.length;
+    for (const task of items) {
+      const item = node("div", undefined, "item");
+      item.append(node("strong", task.title), node("p", taskProgress(task)));
+      if (task.error) item.append(node("p", task.error, "muted"));
+      if (["paused", "blocked"].includes(task.status))
+        item.append(
+          button("继续任务", () => {
+            if (
+              task.requiresReview &&
+              !confirm(
+                "上次操作可能已执行。请先在目标网页人工核对结果，确认无需重复提交后再继续。是否已完成核对？",
+              )
+            )
+              return;
+            state.resumeTaskId = task.id;
+            state.acknowledgePending = task.requiresReview;
+            $("#quick-start").checked = true;
+            $("#question").value =
+              "继续当前指南任务，保留原计划和已有成果，完成剩余模块并汇总。";
+            $("#ask-form").requestSubmit();
+          }),
+        );
+      panel.append(item);
+    }
+    if (items.some((task) => task.status === "running"))
+      state.guideTaskTimer = setTimeout(() => {
+        if (state.view === "agent")
+          loadView().catch((e) => notice(e.message, true));
+      }, 2000);
+  }
   if (state.view === "knowledge") {
     const data = await api(base + "/wiki");
     $("#wiki-mode").textContent =
@@ -293,6 +337,7 @@ async function stream(route, data, target, isPublic = false) {
     decoder = new TextDecoder();
   let buffer = "";
   let failed = false;
+  let result;
   while (true) {
     const { done, value } = await reader.read();
     buffer += decoder.decode(value, { stream: !done });
@@ -304,6 +349,15 @@ async function stream(route, data, target, isPublic = false) {
         if (line.startsWith("data: ")) {
           const e = JSON.parse(line.slice(6));
           if (e.type === "session" && !isPublic) state.session = e.sessionId;
+          if (e.type === "guide_task" && !isPublic) {
+            state.resumeTaskId = e.task.id;
+            $("#guide-task-status").textContent = taskProgress(e.task);
+            if (!state.guideTaskTimer && state.view === "agent")
+              state.guideTaskTimer = setTimeout(
+                () => loadView().catch((error) => notice(error.message, true)),
+                2000,
+              );
+          }
           if (e.type === "skill")
             target.insertBefore(
               node("div", `使用 Skill：${e.name}`, "event"),
@@ -337,8 +391,10 @@ async function stream(route, data, target, isPublic = false) {
               ),
               answer,
             );
-          if (e.type === "done" && !answer.textContent)
-            answer.textContent = e.result.answer;
+          if (e.type === "done") {
+            result = e.result;
+            if (!answer.textContent) answer.textContent = e.result.answer;
+          }
           if (e.type === "document" || e.type === "guide")
             target.insertBefore(
               node(
@@ -358,6 +414,19 @@ async function stream(route, data, target, isPublic = false) {
     if (done) break;
   }
   if (failed) throw Error("生成未完成，请检查提示。");
+  if (!result) throw Error("连接已中断，指南进度已保留，可在指南任务中继续。");
+  return result;
+}
+function taskProgress(task) {
+  const status =
+    {
+      running: "处理中",
+      paused: "已暂停，可继续",
+      blocked: "受阻，待处理",
+      completed: "完整指南已保存",
+      partial: "指南已保存，部分场景未完成",
+    }[task.status] || task.status;
+  return `${status} · 已保存 ${task.modulesSaved}/${task.modulesTotal} 个模块 · 已核验 ${task.scenariosVerified}/${task.scenariosTotal} 个场景`;
 }
 $("#auth-form").onsubmit = async (e) => {
   e.preventDefault();
@@ -470,6 +539,9 @@ $("#connect-browser").onclick = async () => {
 };
 $("#new-session").onclick = () => {
   state.session = null;
+  state.resumeTaskId = null;
+  state.acknowledgePending = false;
+  $("#guide-task-status").textContent = "";
   $("#messages").replaceChildren(node("p", "新会话已就绪。", "empty"));
 };
 $("#ask-form").onsubmit = async (e) => {
@@ -481,19 +553,34 @@ $("#ask-form").onsubmit = async (e) => {
     $("#messages").append(node("div", q, "message"));
     $("#ask-button").disabled = true;
     $("#stop").hidden = false;
-    await stream(
+    const result = await stream(
       "/api/ask",
       {
         question: q,
         projectKey: state.project.key,
-        sessionId: state.session || undefined,
+        sessionId: state.resumeTaskId ? undefined : state.session || undefined,
+        taskId: $("#quick-start").checked
+          ? state.resumeTaskId || undefined
+          : undefined,
+        acknowledgePending: state.acknowledgePending,
         browserId: state.browser || undefined,
         mode: $("#quick-start").checked ? "quick_start" : "chat",
       },
       $("#messages"),
     );
     $("#question").value = "";
-    notice("本轮已完成。");
+    state.acknowledgePending = false;
+    if (["completed", "partial"].includes(result.outcome))
+      state.resumeTaskId = null;
+    notice(
+      result.outcome === "paused" || result.outcome === "blocked"
+        ? "指南尚未完成，进度已保存，可继续任务。"
+        : result.outcome === "partial"
+          ? "指南已保存，部分场景存在限制，请查看生成产物。"
+          : result.taskId
+            ? "完整指南已保存。"
+            : "本轮已完成。",
+    );
   } catch (e) {
     notice(
       e.name === "AbortError" ? "运行已停止。" : e.message,
@@ -503,6 +590,7 @@ $("#ask-form").onsubmit = async (e) => {
     $("#ask-button").disabled = false;
     $("#stop").hidden = true;
     state.controller = null;
+    if (state.view === "agent") await loadView();
   }
 };
 $("#stop").onclick = () => state.controller?.abort();

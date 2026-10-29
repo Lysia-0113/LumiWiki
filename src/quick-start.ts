@@ -413,6 +413,61 @@ export class QuickStartRun {
     this.writeEpoch = undefined;
     this.audit = [];
   }
+  restore(snapshot: ReturnType<QuickStartRun["report"]>) {
+    ensure(
+      !snapshot.plan || Value.Check(planSchema, snapshot.plan),
+      "保存的任务契约无效",
+    );
+    this.reset();
+    this.runId = snapshot.runId;
+    this.plan = structuredClone(snapshot.plan);
+    this.scenarios = structuredClone(snapshot.scenarios);
+    this.documents = new Map(Object.entries(snapshot.documents));
+    this.published = snapshot.published;
+    this.revision = snapshot.revision;
+    // The old browser's refs and write epoch are never reused after reconnecting.
+    this.active = snapshot.active
+      ? this.scenarios.find(
+          (s) =>
+            s.moduleId === snapshot.active!.moduleId &&
+            s.scenarioId === snapshot.active!.scenarioId,
+        )
+      : undefined;
+  }
+  resume() {
+    this.continuations = 0;
+    for (const scenario of this.scenarios) {
+      if (
+        scenario.status === "blocked" &&
+        !this.documents.has(scenario.moduleId)
+      ) {
+        scenario.status = "pending";
+        delete scenario.reason;
+      }
+    }
+  }
+  readyModules() {
+    return (this.plan?.modules || []).flatMap((module) => {
+      if (this.documents.has(module.id)) return [];
+      const cases = this.scenarios.filter((s) => s.moduleId === module.id);
+      const imageIds = [
+        ...new Set(
+          cases
+            .filter((s) => s.status === "verified")
+            .flatMap((s) => [
+              ...s.checkpoints.flatMap((c) => c.images.slice(-1)),
+              ...s.images.slice(-1),
+            ]),
+        ),
+      ].slice(0, 4);
+      try {
+        this.assertDocument(module.id, imageIds);
+        return [{ moduleId: module.id, title: module.title, imageIds }];
+      } catch {
+        return [];
+      }
+    });
+  }
   setPlan(plan: TaskPlan, seenControls?: ReadonlySet<string>) {
     ensure(Value.Check(planSchema, plan), "任务契约格式无效");
     if (seenControls)
@@ -906,6 +961,20 @@ export class QuickStartRun {
   guard(tool: string, input: Record<string, unknown>) {
     if (!this.enabled) return;
     if (
+      [
+        "browser_act",
+        "browser_navigate",
+        "quick_start_prepare",
+        "quick_start_begin",
+      ].includes(tool)
+    ) {
+      const ready = this.readyModules();
+      ensure(
+        !ready.length,
+        `模块已完成，请先用 document_write 保存后再继续：${JSON.stringify(ready)}`,
+      );
+    }
+    if (
       this.scenarios.length &&
       this.scenarios.every((s) => s.status === "blocked")
     )
@@ -958,6 +1027,10 @@ export class QuickStartRun {
       contractReview: "draft",
       revision: this.revision,
       continuations: this.continuations,
+      active: this.active
+        ? { moduleId: this.active.moduleId, scenarioId: this.active.scenarioId }
+        : undefined,
+      readyModules: this.readyModules(),
     };
   }
 }
@@ -967,10 +1040,40 @@ export function quickStartHooks(
   save: () => Promise<void>,
   emit: (event: Record<string, unknown>) => void,
   canContinue: () => boolean = () => true,
+  lifecycle?: {
+    beforeTool: (name: string, input: Record<string, unknown>) => Promise<void>;
+    afterTool: (
+      name: string,
+      input: Record<string, unknown>,
+      error: boolean,
+    ) => Promise<void>;
+    shouldPause: () => boolean;
+    blockedTool?: (name: string, input: Record<string, unknown>) => void;
+  },
 ): ExtensionFactory {
   return (pi) => {
-    pi.on("before_agent_start", () =>
-      run.enabled
+    const progress = () =>
+      JSON.stringify({
+        modules: run.plan?.modules.map((m) => m.id),
+        documents: [...run.documents],
+        scenarios: run.scenarios.map((s) => ({
+          module: s.moduleId,
+          id: s.scenarioId,
+          status: s.status,
+          checkpoints: s.checkpoints.map((c) =>
+            Boolean(
+              c.evidence?.checks.every((x) => x.passed) && c.images.length,
+            ),
+          ),
+          outcomes: s.outcomes.map((o) => o.ids),
+        })),
+      });
+    let previousProgress = "";
+    let idleSettles = 0;
+    pi.on("before_agent_start", () => {
+      previousProgress = progress();
+      idleSettles = 0;
+      return run.enabled
         ? {
             message: {
               customType: "quick-start-state",
@@ -978,18 +1081,25 @@ export function quickStartHooks(
               display: false,
             },
           }
-        : undefined,
-    );
-    pi.on("tool_call", (event) => {
+        : undefined;
+    });
+    pi.on("tool_call", async (event) => {
       try {
         run.guard(event.toolName, event.input);
+        if (run.enabled)
+          await lifecycle?.beforeTool(event.toolName, event.input);
       } catch (error) {
+        if (run.enabled) {
+          lifecycle?.blockedTool?.(event.toolName, event.input);
+          await save();
+        }
         return {
           block: true,
           reason: (error as Error).message,
           terminate:
-            run.scenarios.length > 0 &&
-            run.scenarios.every((s) => s.status === "blocked"),
+            Boolean(lifecycle?.shouldPause()) ||
+            (run.scenarios.length > 0 &&
+              run.scenarios.every((s) => s.status === "blocked")),
         };
       }
     });
@@ -1001,10 +1111,36 @@ export function quickStartHooks(
         tool: event.toolName,
         error: event.isError,
       });
+      await lifecycle?.afterTool(event.toolName, event.input, event.isError);
       await save();
+      if (run.readyModules().length) {
+        const ready = JSON.stringify(run.readyModules());
+        // Keep JSON tool results parseable, including screenshots consumed by clients.
+        const content = event.content.map((item) => {
+          if (item.type !== "text") return item;
+          try {
+            const value = JSON.parse(item.text);
+            if (value && !Array.isArray(value) && typeof value === "object")
+              return {
+                ...item,
+                text: JSON.stringify({
+                  ...value,
+                  nextAction: `立即用 document_write 保存已完成模块，使用其归档图片：${ready}`,
+                }),
+              };
+          } catch {
+            /* Plain-text references keep their original representation. */
+          }
+          return item;
+        });
+        return { content };
+      }
     });
     pi.on("agent_before_settle", async (event) => {
       if (!run.enabled) return;
+      const currentProgress = progress();
+      idleSettles = currentProgress === previousProgress ? idleSettles + 1 : 0;
+      previousProgress = currentProgress;
       const allBlocked =
         run.scenarios.length > 0 &&
         run.scenarios.every((s) => s.status === "blocked");
@@ -1012,7 +1148,7 @@ export function quickStartHooks(
         event.outcome === "completed" &&
         !run.published &&
         !allBlocked &&
-        run.continuations < 2 &&
+        idleSettles <= 2 &&
         canContinue()
       ) {
         run.continuations++;
@@ -1024,7 +1160,7 @@ export function quickStartHooks(
               type: "custom_message" as const,
               customType: "quick-start-resume",
               display: false,
-              content: `任务还没有生成指南，不能在此结束。继续当前用户已授权任务：先根据quick_start_status确认状态，再执行下一步；尚未规划时先用quick_start_plan锁定契约。检查点验证后截图再继续，最后核验业务结果、保存文档和汇总。遇到真实阻碍用block记录，不编造通过。当前剩余续跑次数${2 - run.continuations}。`,
+              content: `任务还没有生成指南，继续当前用户已授权任务：根据quick_start_status处理剩余步骤，保留原计划和已保存文档，不重复业务提交。尚未规划时先锁定契约；每完成一个模块立即保存文档，最后汇总。遇到真实阻碍用block记录，不编造通过。持续没有新增核验或文档时暂停并说明原因。`,
             },
           ],
         };

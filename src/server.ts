@@ -25,6 +25,11 @@ import {
 } from "./browser.js";
 import { ask, disposeConversations } from "./agent.js";
 import {
+  getGuideTask,
+  listGuideTasks,
+  guideTaskSummary,
+} from "./guide-tasks.js";
+import {
   deepwikiRequest,
   submitWiki,
   wikiTask,
@@ -243,6 +248,19 @@ export function createServer() {
           );
           return;
         }
+        if (sub === "tasks" && method === "GET") {
+          send(res, 200, { items: await listGuideTasks(id) });
+          return;
+        }
+        const taskId = sub.match(/^tasks\/([a-f0-9-]{36})$/);
+        if (taskId && method === "GET") {
+          const task = await getGuideTask(id, taskId[1]);
+          send(res, 200, {
+            ...guideTaskSummary(task),
+            workflow: task.workflow,
+          });
+          return;
+        }
         if (sub === "qa" && method === "GET") {
           send(res, 200, { items: await listQa(id) });
           return;
@@ -371,6 +389,16 @@ export function createServer() {
         ensure(
           ["chat", "quick_start"].includes(data.mode || "chat"),
           "当前支持 chat / quick_start",
+        );
+        ensure(
+          data.taskId === undefined ||
+            (typeof data.taskId === "string" && validId(data.taskId)),
+          "指南任务标识无效",
+        );
+        ensure(
+          data.acknowledgePending === undefined ||
+            typeof data.acknowledgePending === "boolean",
+          "核对标记无效",
         );
         const project = await getProject(data.projectKey);
         res.writeHead(200, {
