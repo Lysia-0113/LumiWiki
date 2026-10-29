@@ -11,6 +11,7 @@ import {
   getProject,
   json,
   listProjects,
+  migrateProjectSettings,
   projectDir,
   publicBrowserSettings,
   updateProject,
@@ -690,7 +691,7 @@ export function createServer() {
 }
 export async function main() {
   await mkdir(config.data, { recursive: true, mode: 0o700 });
-  if (!(await listProjects()).length && process.env.TARGET_REPO)
+  if (!(await migrateProjectSettings()).length && process.env.TARGET_REPO)
     await createProject({
       name: path.basename(process.env.TARGET_REPO),
       path: process.env.TARGET_REPO,
