@@ -29,6 +29,8 @@ import {
   observe,
 } from "./browser.js";
 import { ask, disposeConversations } from "./agent.js";
+import { admitQa } from "./qa-admission.js";
+import type { QaAnswerResult } from "./qa-result.js";
 import {
   getGuideTask,
   listGuideTasks,
@@ -566,13 +568,6 @@ export function createServer() {
             if (!res.destroyed)
               res.write("data: " + JSON.stringify(e) + "\n\n");
           };
-          const saveAnswer = (answer: string) =>
-            saveQa(
-              active,
-              { question: data.question, answer, status: "draft" },
-              undefined,
-              "public",
-            );
           let browserId: string | undefined;
           const keep = setInterval(() => {
             if (!res.destroyed) res.write(": keepalive\n\n");
@@ -620,7 +615,13 @@ export function createServer() {
                 true,
               );
               const result = completed?.result as
-                | { answer?: unknown }
+                | {
+                    answer?: unknown;
+                    runId: string;
+                    sessionId: string;
+                    outcome: string;
+                    qaResult?: QaAnswerResult;
+                  }
                 | undefined;
               ensure(
                 completed &&
@@ -630,14 +631,34 @@ export function createServer() {
                 502,
               );
               abort.signal.throwIfAborted();
-              const saved = await saveAnswer(result.answer);
-              emit({ type: "qa", qa: publicQa(saved), tier: "generated" });
+              const admission = await admitQa(
+                active,
+                data.question,
+                result.qaResult,
+                result.runId,
+                abort.signal,
+              );
+              const reusable =
+                admission.qa?.enabled &&
+                ["admitted", "duplicate"].includes(admission.decision)
+                  ? admission.qa
+                  : undefined;
+              if (reusable)
+                emit({ type: "qa", qa: publicQa(reusable), tier: "generated" });
               emit({
-                ...completed,
+                type: "done",
                 result: {
-                  ...(completed.result as Record<string, unknown>),
-                  qaId: saved.id,
-                  qaStatus: saved.status,
+                  answer: result.answer,
+                  sessionId: result.sessionId,
+                  runId: result.runId,
+                  outcome: result.outcome,
+                  qaId: reusable?.id ?? null,
+                  qaStatus: reusable?.status ?? null,
+                  answerOutcome: result.qaResult?.outcome ?? "unclassified",
+                  admission: {
+                    decision: admission.decision,
+                    reason: admission.reason,
+                  },
                 },
               });
             }

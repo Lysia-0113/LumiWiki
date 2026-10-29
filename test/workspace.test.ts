@@ -24,11 +24,43 @@ after(async () => {
 });
 test("三栏目工作台接入真实产物、文字 QA 生成/编辑/审核、知识库导入和项目隔离", async () => {
   const model = http.createServer(async (req, res) => {
-    for await (const _chunk of req) {
-    }
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const input = JSON.parse(raw);
+    const shouldFinish =
+      input.tools?.some((tool: any) => tool.function.name === "qa_finish") &&
+      !input.messages.some((message: any) => message.role === "tool");
+    const content = "打开设置，选择个人资料，然后保存修改。";
+    const prompt = input.messages
+      .filter((message: any) => message.role === "system")
+      .map((message: any) => message.content)
+      .join("\n");
+    const delta = shouldFinish
+      ? {
+          role: "assistant",
+          tool_calls: [
+            {
+              index: 0,
+              id: randomUUID(),
+              type: "function",
+              function: {
+                name: "qa_finish",
+                arguments: JSON.stringify({
+                  outcome: "answered",
+                  answer: content,
+                  scope: "general",
+                  evidence: [
+                    ...new Set(prompt.match(/[a-f0-9-]{36}:p\d+/g) || []),
+                  ].map((location) => ({ kind: "doc", location })),
+                }),
+              },
+            },
+          ],
+        }
+      : { role: "assistant", content };
     res.writeHead(200, { "Content-Type": "text/event-stream" });
     res.end(
-      `data: ${JSON.stringify({ id: "ui", object: "chat.completion.chunk", created: 1, model: "fixture", choices: [{ index: 0, delta: { role: "assistant", content: "打开设置，选择个人资料，然后保存修改。" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+      `data: ${JSON.stringify({ id: "ui", object: "chat.completion.chunk", created: 1, model: "fixture", choices: [{ index: 0, delta, finish_reason: shouldFinish ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`,
     );
   });
   await new Promise<void>((resolve) => model.listen(0, "127.0.0.1", resolve));
@@ -40,6 +72,7 @@ test("三栏目工作台接入真实产物、文字 QA 生成/编辑/审核、�
   const first = await createProject({
       name: "memos",
       url: "http://127.0.0.1:8081",
+      publicBrowser: { enabled: false },
     }),
     second = await createProject({ name: "另一个项目" });
   await atomic(path.join(tmp, "deployment.json"), {
@@ -203,7 +236,9 @@ test("三栏目工作台接入真实产物、文字 QA 生成/编辑/审核、�
     await page.locator("#wiki-upload").setInputFiles({
       name: "workspace.md",
       mimeType: "text/markdown",
-      buffer: Buffer.from("# 页面说明\n使用帮助"),
+      buffer: Buffer.from(
+        "# 页面说明\n修改个人资料或头像：打开设置，选择个人资料，然后保存修改。",
+      ),
     });
     await page
       .getByRole("heading", { name: "workspace.md", exact: true })

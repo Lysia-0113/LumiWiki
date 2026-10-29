@@ -524,10 +524,10 @@ export class QuickStartRun {
             (s.checkpoints || []).length,
           "检查点ID重复",
         );
-        if ((plan.profile || "admin") === "admin")
+        if ((plan.profile || "general") === "admin")
           ensure(
             (s.checkpoints?.length || 0) >= (s.kind === "success" ? 2 : 1),
-            "后台任务成功场景至少需要2个中间检查点，其他场景至少1个；简单只读任务可显式使用general",
+            "admin深度验收成功场景至少需要2个中间检查点，其他场景至少1个；一般指南默认使用general",
           );
         for (const checks of [
           s.preconditions,
@@ -578,7 +578,10 @@ export class QuickStartRun {
       }
     }
     this.enabled = true;
-    this.plan = structuredClone({ ...plan, profile: plan.profile || "admin" });
+    this.plan = structuredClone({
+      ...plan,
+      profile: plan.profile || "general",
+    });
     this.scenarios = plan.modules.flatMap((m) =>
       m.scenarios.map((s) => ({
         moduleId: m.id,

@@ -4,6 +4,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { config, ensure } from "./config.js";
 import { atomic, json, projectDir } from "./store.js";
 import type { DocumentReference } from "./documents.js";
+import type { QaEvidence } from "./qa-result.js";
 
 export interface Qa {
   id: string;
@@ -19,6 +20,7 @@ export interface Qa {
     recentQuestions: string[];
   };
   origin?: "public";
+  provenance?: { runId: string; evidence: QaEvidence[] };
   source?: {
     guideId: string;
     moduleId: string;
@@ -109,6 +111,7 @@ export async function saveQa(
   },
   source?: Qa["source"],
   origin?: Qa["origin"],
+  provenance?: Qa["provenance"],
 ) {
   ensure(
     input.question?.trim() &&
@@ -147,6 +150,12 @@ export async function saveQa(
       source: previous?.source || source,
       usage: previous?.usage,
     };
+    const unchanged =
+      previous?.question === qa.question &&
+      previous.answer === qa.answer &&
+      JSON.stringify(previous.aliases) === JSON.stringify(qa.aliases);
+    qa.provenance =
+      provenance ?? (unchanged ? previous?.provenance : undefined);
     await atomic(qaFile(projectId, id), qa);
     return qa;
   });
