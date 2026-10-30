@@ -260,6 +260,22 @@ test("工具权限由宿主阶段控制，QA/聊天无画框，规划无业务�
     allowedConversationTool("quick_start_publish", "chapter"),
     false,
   );
+  assert.equal(allowedConversationTool("document_write", "chapter"), false);
+  assert.equal(allowedConversationTool("guide_chapter_ready", "chapter"), true);
+  assert.equal(allowedConversationTool("guide_research_gap", "chapter"), true);
+  assert.equal(allowedConversationTool("document_write", "writer"), true);
+  for (const name of [
+    "browser_observe",
+    "browser_act",
+    "wiki_read",
+    "image_annotate",
+    "guide_outline",
+    "guide_chapter_ready",
+    "guide_research_gap",
+    "quick_start_verify",
+    "qa_write",
+  ])
+    assert.equal(allowedConversationTool(name, "writer"), false, name);
   assert.equal(explorationAction("fill"), false);
   assert.equal(explorationAction("click"), false);
   assert.equal(explorationAction("expand"), true);

@@ -157,18 +157,57 @@ interface ScenarioState {
   images: string[];
 }
 
-function locate(root: Page | Locator, target: Target): Locator {
+async function locate(root: Page | Locator, target: Target): Promise<Locator> {
+  if ("role" in target && target.role === "generic") {
+    // Generic named icons often expose a title/aria-label, not inner text.
+    // Prefer visible semantic names, retaining strict unique/count checks below.
+    for (const candidate of [
+      root.getByTitle(target.name, { exact: true }),
+      root.getByLabel(target.name, { exact: true }),
+      root.getByText(target.name, { exact: true }),
+    ]) {
+      const visible = candidate.filter({ visible: true });
+      if (await visible.count()) return visible;
+    }
+    return root.getByText(target.name, { exact: true });
+  }
   if (
     "role" in target &&
-    ["generic", "paragraph", "text", "strong", "emphasis"].includes(target.role)
+    ["paragraph", "text", "strong", "emphasis"].includes(target.role)
   )
     return root.getByText(target.name, { exact: true });
+  if ("role" in target && target.role === "heading") {
+    // Keep business words exact while ignoring only decorative outer glyphs.
+    const name = target.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const decoration = /[\s\p{Co}\p{So}\p{Cf}]*/u.source;
+    return root.getByRole("heading", {
+      name: new RegExp(`^${decoration}${name}${decoration}$`, "u"),
+    });
+  }
   if ("role" in target)
     return root.getByRole(target.role as Parameters<Page["getByRole"]>[0], {
       name: target.name,
       exact: true,
     });
-  if ("text" in target) return root.getByText(target.text, { exact: true });
+  if ("text" in target) {
+    const text = root.getByText(target.text, { exact: true });
+    const count = await text.count();
+    if (count === 1) return text;
+    const control = root.getByRole("button", { name: target.text, exact: true })
+      .or(root.getByRole("link", { name: target.text, exact: true }))
+      .or(root.getByRole("heading", { name: target.text, exact: true }));
+    const controls = await control.count();
+    if (count === 0 && controls) return control;
+    if (count > 1 && controls === 1) {
+      const element = await control.elementHandle();
+      try {
+        // Collapse nested text fragments only when every match belongs to the
+        // same named control. Distinct records/buttons remain ambiguous.
+        if (element && await text.evaluateAll((nodes, owner) => nodes.every((node) => owner === node || owner.contains(node)), element)) return control;
+      } finally { await element?.dispose(); }
+    }
+    return text;
+  }
   if ("label" in target) {
     let field = root
       .getByLabel(target.label, { exact: true })
@@ -211,7 +250,7 @@ export async function verifyChecks(
         try {
           let root: Page | Locator = page;
           if (check.scope) {
-            const scope = locate(page, check.scope);
+            const scope = await locate(page, check.scope);
             if ((await scope.count()) !== 1 || !(await scope.isVisible()))
               return {
                 id: check.id,
@@ -221,7 +260,7 @@ export async function verifyChecks(
               };
             root = scope;
           }
-          const target = locate(root, check.target);
+          const target = await locate(root, check.target);
           const count = await target.count();
           let passed = false;
           let actual = `matched=${count}`;
@@ -1018,6 +1057,7 @@ export function quickStartHooks(
         run.scenarios.every((s) => s.status === "blocked");
       if (
         event.outcome === "completed" &&
+        !(chapterMode && run.audit.at(-1)?.event === "model_stop:length") &&
         !isComplete() &&
         !allBlocked &&
         run.continuations < 2 &&
@@ -1033,7 +1073,7 @@ export function quickStartHooks(
               customType: "quick-start-resume",
               display: false,
               content: chapterMode
-                ? `当前章节尚未保存。继续已授权的本章任务：读取quick_start_status，未规划时先定义本章契约，逐项核验和截图后用document_write保存完整章节；整本指南由宿主组装，不调用发布工具。遇到真实阻碍用guide_chapter_block记录，不能编造通过。剩余续跑次数${2 - run.continuations}。`
+                ? `当前章节尚未提交事实包。继续已授权的本章任务：未规划时先定义本章契约，核验工具通过会自动截图。完成后用guide_chapter_ready提交事实，宿主会停止探索并启动独立写作；这里没有document_write。遇到真实阻碍用guide_chapter_block记录，不编造通过。剩余续跑次数${2 - run.continuations}。`
                 : `任务还没有生成指南，不能在此结束。继续当前用户已授权任务：先根据quick_start_status确认状态，再执行下一步；尚未规划时先用quick_start_plan锁定契约。检查点验证后截图再继续，最后核验业务结果、保存文档和汇总。遇到真实阻碍用block记录，不编造通过。当前剩余续跑次数${2 - run.continuations}。`,
             },
           ],

@@ -21,6 +21,7 @@ export const chapterSchema = Type.Object(
     entryUrls: Type.Optional(Type.Array(text(), { maxItems: 20 })),
     wikiPageIds: Type.Optional(Type.Array(text(), { maxItems: 40 })),
     dependsOn: Type.Optional(Type.Array(key(), { maxItems: 63 })),
+    readingPrerequisites: Type.Optional(Type.Array(key(), { maxItems: 63 })),
   },
   { additionalProperties: false },
 );
@@ -50,6 +51,20 @@ export type ChapterStatus =
   | "generated"
   | "blocked"
   | "failed";
+export interface GuidePhaseMetrics {
+  phase: "planner" | "chapter" | "writer";
+  chapterId?: string;
+  startedAt: string;
+  elapsedMs: number;
+  modelCalls: number;
+  modelWaitMs: number;
+  compactionMs?: number;
+  compactions?: number;
+  toolCalls: number;
+  toolMs: number;
+  inputTokens: number;
+  outputTokens: number;
+}
 export interface ChapterState {
   spec: ChapterSpec;
   status: ChapterStatus;
@@ -57,6 +72,8 @@ export interface ChapterState {
   version: number;
   lease?: string;
   documentId?: string;
+  evidenceId?: string;
+  stage?: "exploring" | "writing";
   reason?: string;
   limitations: string[];
   coverageComplete?: boolean;
@@ -91,6 +108,7 @@ export interface GuideTask {
   revisions: Array<{ at: string; reason: string; chapterIds: string[] }>;
   chapters: ChapterState[];
   toolCalls: number;
+  performance?: GuidePhaseMetrics[];
   error?: string;
   createdAt: string;
   updatedAt: string;
@@ -250,6 +268,12 @@ export class GuideWorkflow {
         new Set(chapter.questions).size === chapter.questions.length,
         "章节待解答问题不能重复",
       );
+      const reading = chapter.readingPrerequisites || [];
+      ensure(
+        new Set(reading).size === reading.length &&
+          reading.every((reference) => ids.has(reference) && reference !== id),
+        "阅读前置章节不存在、重复或引用自身",
+      );
       const deps = chapter.dependsOn || [];
       ensure(
         new Set(deps).size === deps.length &&
@@ -295,7 +319,11 @@ export class GuideWorkflow {
     }
     for (const chapter of this.task.chapters) {
       if (retry.has(chapter.spec.id)) {
-        if (chapter.documentId) chapter.version++;
+        if (chapter.documentId) {
+          chapter.version++;
+          chapter.evidenceId = undefined;
+        }
+        chapter.stage = undefined;
         chapter.status = "pending";
         chapter.lease = undefined;
         chapter.documentId = undefined;
@@ -326,6 +354,7 @@ export class GuideWorkflow {
       "依赖章节尚未生成",
     );
     chapter.status = "running";
+    chapter.stage = chapter.evidenceId ? "writing" : "exploring";
     chapter.attempts++;
     chapter.lease = randomUUID();
     chapter.reason = undefined;
@@ -459,9 +488,11 @@ export class GuideWorkflow {
             ),
           ),
         );
-        return { id: chapter.spec.id, title: chapter.spec.title, html, md };
+        return { id: chapter.spec.id, title: chapter.spec.title, html, md, presentation: doc.presentation };
       }),
     );
+    const functional = parts.every((part) => part.presentation === "functional_overview");
+    const visibleLimitations = functional ? [] : limitations;
     const complete =
       generated.length === this.task.chapters.length &&
       generated.every((c) => c.coverageComplete !== false);
@@ -469,6 +500,7 @@ export class GuideWorkflow {
     const guide = {
       id: this.task.guideId,
       taskId: this.task.id,
+      ...(functional ? { presentation: "functional_overview" as const } : {}),
       title: this.task.outline.title,
       audience: this.task.outline.audience,
       overview: this.task.outline.overview,
@@ -499,15 +531,15 @@ export class GuideWorkflow {
     // Publish metadata last: only point readers at a bundle once both rendered formats exist.
     await atomic(
       path.join(root, "guides", guide.id + ".html"),
-      renderGuideHtml(guide.title, parts, limitations, {
+      renderGuideHtml(guide.title, parts, visibleLimitations, {
         overview: guide.overview,
-        audience: guide.audience,
+        ...(functional ? {} : { audience: guide.audience }),
       }),
       true,
     );
     await atomic(
       path.join(root, "guides", guide.id + ".md"),
-      `# ${guide.title}\n\n${guide.overview}\n\n## 目录\n\n${parts.map((p, i) => `${i + 1}. [${p.title}](#chapter-${p.id})`).join("\n")}\n\n${limitations.length ? `## 使用限制与未完成范围\n\n${limitations.map((s) => `- ${s}`).join("\n")}\n\n` : ""}${parts.map((p) => `<a id="chapter-${p.id}"></a>\n\n${p.md}`).join("\n\n---\n\n")}`,
+      `# ${guide.title}\n\n${guide.overview}\n\n## 目录\n\n${parts.map((p, i) => `${i + 1}. [${p.title}](#chapter-${p.id})`).join("\n")}\n\n${visibleLimitations.length ? `## 使用限制与未完成范围\n\n${visibleLimitations.map((s) => `- ${s}`).join("\n")}\n\n` : ""}${parts.map((p) => `<a id="chapter-${p.id}"></a>\n\n${p.md}`).join("\n\n---\n\n")}`,
       true,
     );
     let qaGeneration: unknown;

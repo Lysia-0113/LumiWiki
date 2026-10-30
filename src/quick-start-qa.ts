@@ -228,31 +228,38 @@ async function generate(
             guideTitle: guide.title,
             moduleId: m.id,
             documentId: m.documentId,
+            presentation: doc.presentation,
             title: doc.title,
             summary: doc.summary,
-            audience: textField(doc.audience),
-            prerequisites: textField(doc.prerequisites),
+            ...(doc.presentation === "functional_overview"
+              ? {}
+              : {
+                  audience: textField(doc.audience),
+                  prerequisites: textField(doc.prerequisites),
+                  outcomes: textField(doc.outcomes),
+                  troubleshooting:
+                    Array.isArray(doc.troubleshooting) &&
+                    doc.troubleshooting.every(
+                      (item) =>
+                        item &&
+                        typeof item.problem === "string" &&
+                        typeof item.solution === "string",
+                    )
+                      ? doc.troubleshooting.map(({ problem, solution }) => ({
+                          problem,
+                          solution,
+                        }))
+                      : textField(doc.troubleshooting),
+                  limitations: textField(doc.limitations),
+                }),
             details: textField(doc.details),
-            outcomes: textField(doc.outcomes),
-            troubleshooting:
-              Array.isArray(doc.troubleshooting) &&
-              doc.troubleshooting.every(
-                (item) =>
-                  item &&
-                  typeof item.problem === "string" &&
-                  typeof item.solution === "string",
-              )
-                ? doc.troubleshooting.map(({ problem, solution }) => ({
-                    problem,
-                    solution,
-                  }))
-                : textField(doc.troubleshooting),
-            limitations: textField(doc.limitations),
             figureLegends: doc.figureLegends,
             steps: doc.steps.map((step) => ({
               title: step.title,
               instruction: step.instruction,
-              expectedResult: step.expectedResult,
+              ...(doc.presentation === "functional_overview"
+                ? {}
+                : { expectedResult: step.expectedResult }),
             })),
             references: doc.references,
           }),

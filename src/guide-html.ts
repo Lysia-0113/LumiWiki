@@ -19,12 +19,12 @@ export function renderGuideHtml(
   title: string,
   modules: Array<{ id: string; title: string; html: string }>,
   limitations: string[] = [],
-  introduction?: { overview: string; audience: string },
+  introduction?: { overview: string; audience?: string },
 ) {
   return (
     `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escape(title)}</title><style>${documentStyle}</style><main><h1>${escape(title)}</h1>` +
     (introduction
-      ? `<p>${escape(introduction.overview)}</p><p><strong>适用对象：</strong>${escape(introduction.audience)}</p>`
+      ? `<p>${escape(introduction.overview)}</p>${introduction.audience ? `<p><strong>适用对象：</strong>${escape(introduction.audience)}</p>` : ""}`
       : "") +
     (modules.length > 1
       ? '<nav aria-label="模块目录"><ol>' +

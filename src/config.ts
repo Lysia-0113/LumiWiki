@@ -15,6 +15,10 @@ export const config = {
   quickStartMaxTools: Number(process.env.QUICK_START_MAX_TOOL_CALLS || 200),
   quickStartMaxTokens: Number(process.env.QUICK_START_MAX_TOKENS || 8192),
   guidePlanMaxTools: Number(process.env.GUIDE_PLAN_MAX_TOOL_CALLS || 100),
+  guidePlanMaxTokens: Number(process.env.GUIDE_PLAN_MAX_TOKENS || 8192),
+  guideExploreMaxTokens: Number(process.env.GUIDE_EXPLORE_MAX_TOKENS || 8192),
+  guideResearchMaxTools: Number(process.env.GUIDE_RESEARCH_MAX_TOOL_CALLS || 6),
+  guideWriterMaxTools: Number(process.env.GUIDE_WRITER_MAX_TOOL_CALLS || 4),
   guideChapterTimeout: Number(
     process.env.GUIDE_CHAPTER_TIMEOUT_SECONDS || 1800,
   ),

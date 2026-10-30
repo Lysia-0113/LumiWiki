@@ -48,21 +48,26 @@ for (const module of guide.modules.filter((item) => item.documentId)) {
 if (workflow) {
   await workflow.assemble();
 } else {
+  const functional = guide.presentation === "functional_overview";
+  const limitations = functional ? [] : guide.limitations || [];
   await atomic(
     path.join(root, "guides", guideId + ".html"),
     renderGuideHtml(
       guide.title,
       parts,
-      guide.limitations,
+      limitations,
       guide.overview
-        ? { overview: guide.overview, audience: guide.audience || "" }
+        ? {
+            overview: guide.overview,
+            ...(functional ? {} : { audience: guide.audience || "" }),
+          }
         : undefined,
     ),
     true,
   );
   await atomic(
     path.join(root, "guides", guideId + ".md"),
-    `# ${guide.title}\n\n${(guide.limitations || []).map((item) => `- ${item}`).join("\n")}\n\n${parts.map((part) => part.md).join("\n\n---\n\n")}`,
+    `# ${guide.title}\n\n${guide.overview ? guide.overview + "\n\n" : ""}${limitations.length ? `## 使用限制与未完成范围\n\n${limitations.map((item) => `- ${item}`).join("\n")}\n\n` : ""}${parts.map((part) => part.md).join("\n\n---\n\n")}`,
     true,
   );
   await atomic(guideFile, {

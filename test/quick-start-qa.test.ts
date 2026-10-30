@@ -481,7 +481,7 @@ test("初始QA保留结构化故障处理和可信图例文字，不读取截图
   }
 });
 
-test("真实浏览器与原生Pi：目录、章节、初始QA各自独立，宿主自动汇总", async () => {
+test("真实浏览器与原生Pi：目录、探索、writer、初始QA各自独立，宿主自动汇总", async () => {
   const web = http.createServer((_req, res) => {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.end("<h1>账户概览</h1><p>当前余额100元</p>");
@@ -497,7 +497,7 @@ test("真实浏览器与原生Pi：目录、章节、初始QA各自独立，宿�
     assertion: "visible",
   };
   const question = "在哪里查看余额？";
-  const counts = { planner: 0, chapter: 0, qa: 0 };
+  const counts = { planner: 0, chapter: 0, writer: 0, qa: 0 };
   let imageId: string;
   const close = await serve((input, res) => {
     const names = input.tools.map((tool: any) => tool.function.name);
@@ -526,20 +526,36 @@ test("真实浏览器与原生Pi：目录、章节、初始QA各自独立，宿�
       else stream(res, undefined, {}, "规划已保存。");
       return;
     }
-    if (names.includes("document_write")) {
+    if (names.includes("guide_chapter_ready")) {
       assert.ok(
-        names.includes("image_annotate") &&
-          !names.includes("qa_write") &&
-          !names.includes("quick_start_publish"),
+        !names.includes("document_write") && !names.includes("qa_write"),
       );
       const n = counts.chapter++;
-      if (n === 5)
+      if (n === 4) {
+        assert.deepEqual(names.sort(), [
+          "guide_chapter_block",
+          "guide_chapter_ready",
+          "guide_research_gap",
+        ]);
         imageId = JSON.parse(
           [...input.messages]
             .reverse()
             .find((message: any) => message.role === "tool").content,
-        ).id;
-      const actions: Array<[string?, unknown?]> = [
+        ).screenshot.id;
+        stream(res, "guide_chapter_ready", {
+          answers: [
+            {
+              question,
+              status: "covered",
+              explanation: "账户概览显示当前账户余额100元。",
+            },
+          ],
+          references: [{ kind: "page", location: url + "/" }],
+          images: [{ imageId, caption: "当前账户余额" }],
+        });
+        return;
+      }
+      const actions: Array<[string, unknown]> = [
         ["browser_observe", {}],
         [
           "quick_start_plan",
@@ -569,35 +585,50 @@ test("真实浏览器与原生Pi：目录、章节、初始QA各自独立，宿�
         ],
         ["quick_start_begin", { moduleId: "balance", scenarioId: "view" }],
         ["quick_start_verify", {}],
-        ["browser_screenshot", {}],
-        [
-          "document_write",
+      ];
+      assert.ok(actions[n], "事实冻结后不请求探索收尾");
+      stream(res, ...actions[n]);
+      return;
+    }
+    if (names.includes("document_write")) {
+      assert.deepEqual(names, ["document_write"]);
+      assert.equal(counts.writer++, 0, "正文成功后不请求ack");
+      const message = input.messages.find(
+        (message: any) => message.role === "user",
+      );
+      const text =
+        typeof message.content === "string"
+          ? message.content
+          : message.content.map((part: any) => part.text || "").join("\n");
+      const brief = JSON.parse(text);
+      assert.equal(brief.phase, "writer");
+      assert.equal(brief.chapter.id, "balance");
+      assert.equal(brief.images[0].imageId, imageId);
+      assert.equal(brief.answers[0].question, question);
+      assert.ok(
+        !text.includes("quick_start_verify") && !text.includes("<skill"),
+      );
+      stream(res, "document_write", {
+        moduleId: "balance",
+        title: "查看余额",
+        summary: "登录后查看账户余额。",
+        prerequisites: ["已登录账户"],
+        steps: [
           {
-            moduleId: "balance",
-            title: "查看余额",
-            summary: "登录后查看账户余额。",
-            prerequisites: ["已登录账户"],
-            steps: [
-              {
-                title: "查看账户",
-                instruction: "打开账户概览即可看到当前余额。",
-                imageId,
-              },
-            ],
-            coverage: [
-              {
-                question,
-                status: "covered",
-                explanation: "查看账户步骤说明查询入口和余额位置。",
-              },
-            ],
-            references: [{ kind: "page", location: url + "/" }],
+            title: "查看账户",
+            instruction: "打开账户概览即可看到当前余额。",
+            imageId,
           },
         ],
-        [undefined, {}],
-      ];
-      const [name, args] = actions[n] || [];
-      stream(res, name, args);
+        coverage: [
+          {
+            question,
+            status: "covered",
+            explanation: "查看账户步骤说明查询入口和余额位置。",
+          },
+        ],
+        references: [{ kind: "page", location: url + "/" }],
+      });
       return;
     }
     assert.deepEqual(names, ["qa_write"]);
@@ -639,7 +670,7 @@ test("真实浏览器与原生Pi：目录、章节、初始QA各自独立，宿�
     const draftHit = await matchQa(p.key, question);
     assert.equal(draftHit.decision, "direct");
     assert.equal(draftHit.qa?.status, "draft");
-    assert.deepEqual(counts, { planner: 3, chapter: 7, qa: 2 });
+    assert.deepEqual(counts, { planner: 2, chapter: 5, writer: 1, qa: 2 });
   } finally {
     await close();
     web.closeAllConnections();

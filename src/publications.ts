@@ -17,6 +17,7 @@ export interface PublishedGuide {
   id: string;
   title: string;
   summary: string;
+  presentation?: "functional_overview";
   audience?: string[];
   prerequisites?: string[];
   modules: Array<{
@@ -129,18 +130,22 @@ export async function publishGuide(
       throw error;
     }
     const title = text(source.title, "标题");
-    const limitations: string[] = (source.limitations || []).map(
-      (value: unknown) => text(value, "限制说明"),
-    );
+    const functional = source.presentation === "functional_overview";
+    const limitations: string[] = functional
+      ? []
+      : (source.limitations || []).map((value: unknown) =>
+          text(value, "限制说明"),
+        );
     const documents: Array<{ title: string; doc: any }> = [];
     if (kind === "documents") documents.push({ title, doc: source });
     else {
       ensure(Array.isArray(source.modules), "指南模块不完整", 409);
       for (const module of source.modules) {
         if (!module.documentId) {
-          limitations.push(
-            `${text(module.title, "模块标题")}：${text(module.reason, "未完成模块的说明")}`,
-          );
+          if (!functional)
+            limitations.push(
+              `${text(module.title, "模块标题")}：${text(module.reason, "未完成模块的说明")}`,
+            );
           continue;
         }
         ensure(validId(module.documentId), "模块文档标识无效", 409);
@@ -157,16 +162,16 @@ export async function publishGuide(
     for (const { title: moduleTitle, doc } of documents) {
       ensure(
         Array.isArray(doc.steps) && doc.steps.length > 0,
-        "操作步骤不完整",
+        "功能分节不完整",
         409,
       );
       const steps: PublishedStep[] = [];
       for (const step of doc.steps) {
         const item: PublishedStep = {
-          title: text(step.title, "步骤标题"),
-          instruction: text(step.instruction, "操作说明"),
+          title: text(step.title, "分节标题"),
+          instruction: text(step.instruction, "分节说明"),
         };
-        if (step.expectedResult)
+        if (step.expectedResult && !functional)
           item.expectedResult = text(step.expectedResult, "预期结果", true);
         const selected = documentStepImages(step);
         for (const image of selected) {
@@ -203,7 +208,9 @@ export async function publishGuide(
         title: moduleTitle,
         summary: text(doc.summary || "", "模块说明", true),
         steps,
-        ...(Array.isArray(doc.troubleshooting) && doc.troubleshooting.length
+        ...(!functional &&
+        Array.isArray(doc.troubleshooting) &&
+        doc.troubleshooting.length
           ? {
               troubleshooting: doc.troubleshooting.map((item: any) => ({
                 problem: text(item.problem, "故障问题", true),
@@ -211,7 +218,9 @@ export async function publishGuide(
               })),
             }
           : {}),
-        ...(Array.isArray(doc.limitations) && doc.limitations.length
+        ...(!functional &&
+        Array.isArray(doc.limitations) &&
+        doc.limitations.length
           ? { limitations: doc.limitations }
           : {}),
       });
@@ -219,10 +228,15 @@ export async function publishGuide(
     const content = {
       id,
       title,
-      ...(Array.isArray(source.audience) && source.audience.length
+      ...(functional ? { presentation: "functional_overview" as const } : {}),
+      ...(!functional &&
+      Array.isArray(source.audience) &&
+      source.audience.length
         ? { audience: source.audience }
         : {}),
-      ...(Array.isArray(source.prerequisites) && source.prerequisites.length
+      ...(!functional &&
+      Array.isArray(source.prerequisites) &&
+      source.prerequisites.length
         ? { prerequisites: source.prerequisites }
         : {}),
       summary: text(source.summary || source.overview || "", "指南说明", true),

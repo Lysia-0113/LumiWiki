@@ -1,4 +1,4 @@
-export type GuidePhase = "planner" | "chapter";
+export type GuidePhase = "planner" | "chapter" | "writer";
 
 const explorationTools = new Set([
   "wiki_read",
@@ -21,7 +21,9 @@ const chapterTools = new Set([
   "quick_start_checkpoint",
   "quick_start_verify",
   "quick_start_block",
-  "document_write",
+  "guide_chapter_ready",
+  "guide_chapter_context",
+  "guide_research_gap",
   "guide_chapter_block",
   "guide_outline_update",
 ]);
@@ -30,6 +32,7 @@ export function allowedConversationTool(name: string, phase?: GuidePhase) {
   if (phase === "planner")
     return explorationTools.has(name) || name === "guide_outline";
   if (phase === "chapter") return chapterTools.has(name);
+  if (phase === "writer") return name === "document_write";
   return (
     !name.startsWith("quick_start_") &&
     !name.startsWith("guide_") &&

@@ -321,6 +321,7 @@ async function renderGuide() {
       ),
     );
   const publication = state.publications[doc.id];
+  const functional = doc.presentation === "functional_overview";
   actions.append(
     button(
       publication?.status === "published" ? "审核并更新发布" : "审核并发布",
@@ -387,8 +388,9 @@ async function renderGuide() {
         }),
       );
   }
-  for (const limit of doc.limitations || [])
-    target.append(node("p", limit, "muted"));
+  if (!functional)
+    for (const limit of doc.limitations || [])
+      target.append(node("p", limit, "muted"));
   const modules =
     doc.kind === "guides"
       ? doc.modules
@@ -407,13 +409,11 @@ async function renderGuide() {
     if (module.summary) section.append(node("p", module.summary));
     for (const [index, step] of (module.steps || []).entries()) {
       section.append(
-        node("h3", `${index + 1}. ${step.title}`),
+        node("h3", functional ? step.title : `${index + 1}. ${step.title}`),
         node("p", step.instruction),
       );
-      if (step.expectedResult)
-        section.append(
-          node("p", `预期结果：${step.expectedResult}`, "muted"),
-        );
+      if (!functional && step.expectedResult)
+        section.append(node("p", `预期结果：${step.expectedResult}`, "muted"));
       const images = step.images?.length
         ? step.images
         : step.imageId
@@ -443,7 +443,7 @@ async function renderGuide() {
           .catch(() => {
             if (epoch === state.previewEpoch)
               figure.replaceWith(
-                node("p", "此步骤的截图暂时无法加载。", "muted"),
+                node("p", "此处的截图暂时无法加载。", "muted"),
               );
           });
       }
@@ -749,7 +749,22 @@ async function stream(
               "div",
               event.phase === "planner"
                 ? "正在全局只读探索并规划目录……"
-                : `独立章节会话：${event.title || event.chapterId}`,
+                : event.phase === "writer"
+                  ? `独立写作：${event.title || event.chapterId}`
+                  : event.stage === "handoff"
+                    ? `核验已完成，正在收敛事实：${event.title || event.chapterId}`
+                    : event.stage === "research"
+                      ? `定向补充缺口：${event.title || event.chapterId}`
+                      : `独立章节探索：${event.title || event.chapterId}`,
+              "event",
+            ),
+            answer,
+          );
+        if (event.type === "guide_metrics")
+          target.insertBefore(
+            node(
+              "div",
+              `${event.metrics.phase === "writer" ? "写作" : event.metrics.phase === "planner" ? "规划" : "探索"}耗时 ${(event.metrics.elapsedMs / 1000).toFixed(1)} 秒 · 模型 ${event.metrics.modelCalls} 轮 · 工具 ${event.metrics.toolCalls} 次 · 模型等待 ${(event.metrics.modelWaitMs / 1000).toFixed(1)} 秒`,
               "event",
             ),
             answer,
@@ -1400,6 +1415,7 @@ async function readPublicGuide(id) {
   target.replaceChildren(node("p", "正在读取指南……", "muted"));
   const guide = await publicApi("/api/v1/public/guides/" + id);
   if (epoch !== state.publicEpoch) return;
+  const functional = guide.presentation === "functional_overview";
   const params = new URLSearchParams(location.search);
   params.set("guide", id);
   history.replaceState(null, "", location.pathname + "?" + params);
@@ -1418,8 +1434,9 @@ async function readPublicGuide(id) {
     }
     target.append(contents);
   }
-  for (const limitation of guide.limitations)
-    target.append(node("p", limitation, "muted"));
+  if (!functional)
+    for (const limitation of guide.limitations)
+      target.append(node("p", limitation, "muted"));
   for (const [index, module] of guide.modules.entries()) {
     const section = node("section", undefined, "doc-section");
     section.id = "guide-module-" + index;
@@ -1427,13 +1444,14 @@ async function readPublicGuide(id) {
     if (module.summary) section.append(node("p", module.summary));
     for (const [stepIndex, step] of module.steps.entries()) {
       section.append(
-        node("h3", `${stepIndex + 1}. ${step.title}`),
+        node(
+          "h3",
+          functional ? step.title : `${stepIndex + 1}. ${step.title}`,
+        ),
         node("p", step.instruction),
       );
-      if (step.expectedResult)
-        section.append(
-          node("p", `预期结果：${step.expectedResult}`, "muted"),
-        );
+      if (!functional && step.expectedResult)
+        section.append(node("p", `预期结果：${step.expectedResult}`, "muted"));
       const images = step.images?.length
         ? step.images
         : step.imageId

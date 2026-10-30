@@ -37,6 +37,7 @@ export interface UserDocument extends DocumentContent {
   id: string;
   title: string;
   summary: string;
+  presentation?: "functional_overview";
   steps: DocumentStep[];
   references: DocumentReference[];
   [key: string]: unknown;
@@ -117,6 +118,7 @@ export function renderDocument(
   images: ReadonlyMap<string, string>,
   legends: ReadonlyMap<string, readonly DocumentLegendItem[]> = new Map(),
 ) {
+  const functional = doc.presentation === "functional_overview";
   const html: string[] = [
     `<h1>${escapeHtml(doc.title)}</h1><p>${escapeHtml(doc.summary)}</p>`,
   ];
@@ -132,22 +134,25 @@ export function renderDocument(
       `## ${title}\n\n${values.map((value) => `- ${markdownText(value).replace(/\n/g, "\n  ")}`).join("\n")}`,
     );
   };
-  list("适用读者", doc.audience);
-  list("开始前准备", doc.prerequisites);
+  if (!functional) {
+    list("适用读者", doc.audience);
+    list("开始前准备", doc.prerequisites);
+  }
   if (doc.details) {
     html.push(
-      `<section><h2>详细说明</h2><p>${escapeHtml(doc.details)}</p></section>`,
+      functional ? `<p>${escapeHtml(doc.details)}</p>` : `<section><h2>详细说明</h2><p>${escapeHtml(doc.details)}</p></section>`,
     );
-    md.push(`## 详细说明\n\n${markdownText(doc.details)}`);
+    md.push(`${functional ? "" : "## 详细说明\n\n"}${markdownText(doc.details)}`);
   }
   doc.steps.forEach((step, i) => {
+    const prefix = functional ? "" : `${i + 1}. `;
     html.push(
-      `<section><h2>${i + 1}. ${escapeHtml(step.title)}</h2><p>${escapeHtml(step.instruction)}</p>`,
+      `<section><h2>${prefix}${escapeHtml(step.title)}</h2><p>${escapeHtml(step.instruction)}</p>`,
     );
     md.push(
-      `## ${i + 1}. ${markdownText(step.title)}\n\n${markdownText(step.instruction)}`,
+      `## ${prefix}${markdownText(step.title)}\n\n${markdownText(step.instruction)}`,
     );
-    if (step.expectedResult) {
+    if (!functional && step.expectedResult) {
       html.push(
         `<p class="expected-result"><strong>预期结果：</strong>${escapeHtml(step.expectedResult)}</p>`,
       );
@@ -187,8 +192,8 @@ export function renderDocument(
     }
     html.push("</section>");
   });
-  list("完成后你将获得", doc.outcomes);
-  if (doc.troubleshooting?.length) {
+  if (!functional) list("完成后你将获得", doc.outcomes);
+  if (!functional && doc.troubleshooting?.length) {
     html.push(
       `<section><h2>常见问题与处理</h2><dl>${doc.troubleshooting.map((item) => `<div><dt>${escapeHtml(item.problem)}</dt><dd>${escapeHtml(item.solution)}</dd></div>`).join("")}</dl></section>`,
     );
@@ -196,7 +201,7 @@ export function renderDocument(
       `## 常见问题与处理\n\n${doc.troubleshooting.map((item) => `### ${markdownText(item.problem)}\n\n${markdownText(item.solution)}`).join("\n\n")}`,
     );
   }
-  list("适用范围与限制", doc.limitations);
+  if (!functional) list("适用范围与限制", doc.limitations);
   return {
     html: `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escapeHtml(doc.title)}</title><style>${documentStyle}</style><main>${html.join("")}</main></html>`,
     md: md.join("\n\n") + "\n",
